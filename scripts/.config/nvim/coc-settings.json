@@ -1,0 +1,12 @@
+{
+  "coc.preferences.formatOnSaveFiletypes": [
+    "javascript",
+    "typescript",
+    "json",
+    "html",
+    "xml",
+    "markdown",
+    "yaml"
+  ],
+  "prettier.eslintIntegration": true
+}
