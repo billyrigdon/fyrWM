@@ -31,7 +31,7 @@ let currentWindowId: number | null = null;
 let screen = null;
 let GetPropertyAsync: (...args) => Promise<any>;
 let splitDirection = SplitDirection.Horizontal;
-
+let autocompleteWid: number = null;
 // Tracks electron windows
 const browserWindowIds: Set<number> = new Set();
 // Track all open x11 windows
@@ -73,13 +73,21 @@ const config: FyrConfig = (() => {
 // Depends on feh package
 const setWallpaper = (wid: number) => {
   const wallpaperPath = config.customizations.wallpaperPath;
-  exec(`feh --bg-scale ${wallpaperPath} --window-id ${wid}`, (error) => {
+  const command = `feh --bg-scale ${wallpaperPath}`;
+  logToFile(
+    wmLogFilePath,
+    `Setting wallpaper from ${wallpaperPath} with command ${command}`,
+    LogLevel.INFO
+  );
+
+  exec(command, (error) => {
     if (error) {
       logToFile(
         wmLogFilePath,
         `Failed to set wallpaper: ${error}. Is 'feh' installed?`,
         LogLevel.ERROR
       );
+    } else {
     }
   });
 };
@@ -90,95 +98,13 @@ const initDesktop = (display: XDisplay) => {
   const width = screen.pixel_width;
   const height = screen.pixel_height;
 
-  const wid = X.AllocID();
-  X.CreateWindow(wid, root, 0, 0, width, height, 0, 0, 0, 0, {
-    eventMask: X.eventMask.Exposure,
-  });
-  X.MapWindow(wid);
-  setWallpaper(wid);
-  return wid;
-};
-
-const initX11Client = () => {
-  createClient((err, display: XDisplay) => {
-    if (err) {
-      logToFile(
-        wmLogFilePath,
-        `Error in X11 connection:${err}`,
-        LogLevel.ERROR
-      );
-      return;
-    }
-
-    X = display.client;
-    desktopWid = initDesktop(display);
-
-    GetPropertyAsync = promisify(X.GetProperty).bind(X);
-
-    X.ChangeWindowAttributes(root, {
-      eventMask: X.eventMask.SubstructureNotify,
-    });
-
-    // Capture keyboard, mouse, and window events
-
-    X.on("event", (ev) => {
-      if (ev.name === "KeyPress") {
-        // Forward key press event to the currently focused window
-        if (currentWindowId) {
-          X.SendEvent(false, currentWindowId, true, X.eventMask.KeyPress, ev);
-        }
-      } else if (ev.name === "FocusIn") {
-        // Update currentWindowId when a window gains focus
-        currentWindowId = ev.wid;
-      } else if (ev.name === "FocusOut") {
-        // Try to set currentWindowId to a reasonable fallback
-        if (openedWindows.size === 0) {
-          currentWindowId = null;
-        } else {
-          currentWindowId = Array.from(openedWindows).pop() || null; // Last opened or focused window
-        }
-      }
-
-      // Handle new windows
-      if (ev.name === "CreateNotify") {
-        if (!openedWindows.has(ev.wid)) {
-          openApp(ev.wid, splitDirection, currentWindowId);
-          currentWindowId = ev.wid;
-        } else {
-          logToFile(
-            wmLogFilePath,
-            "Open a new window? No thanks, I already got one.",
-            LogLevel.INFO
-          );
-        }
-      }
-
-      // Handle window closing - this is a simplification
-      if (ev.name === "DestroyNotify") {
-        openedWindows.delete(ev.wid);
-        if (currentWindowId === ev.wid) {
-          if (openedWindows.size === 0) {
-            currentWindowId = null;
-          } else {
-            // Last opened or focused window
-            currentWindowId = Array.from(openedWindows).pop() || null;
-          }
-        }
-      }
-    });
-  });
-};
-
-const addBrowserWindowId = (windowId: number) => {
-  browserWindowIds.add(windowId);
-};
-
-// Get Id to create/map/reparent BrowserWindows, also add to set
-const getElectronWindowId = (browserWindow: BrowserWindow): number => {
-  const nativeHandle = browserWindow.getNativeWindowHandle();
-  const wid = nativeHandle.readUint32LE(0);
-  addBrowserWindowId(wid);
-  return wid;
+  // const wid = X.AllocID();
+  // X.CreateWindow(wid, root, 0, 0, width, height, 0, 0, 0, 0, {
+  //   eventMask: X.eventMask.Exposure,
+  // });
+  X.MapWindow(root);
+  setWallpaper(root);
+  return root;
 };
 
 const getWindowGeometry = (windowId: number): Promise<any> => {
@@ -195,25 +121,66 @@ const getWindowGeometry = (windowId: number): Promise<any> => {
   });
 };
 
-// Create X11 container window with desktop as parent
-// Create React component and reparent inside X11 container
+const fetchAppName = async (wid: number): Promise<string | null> => {
+  try {
+    console.log("Debug Atom:", X.atoms._NET_WM_NAME, X.atoms.WM_CLASS); // Debug line
+    const wmNameProperty = await GetPropertyAsync(
+      0,
+      wid,
+      X.atoms._NET_WM_NAME,
+      X.atoms.STRING,
+      0,
+      100
+    );
+    if (wmNameProperty && wmNameProperty.data) {
+      return wmNameProperty.data.toString();
+    }
+    // Fallback to WM_CLASS if _NET_WM_NAME is not available
+    const wmClassProperty = await GetPropertyAsync(
+      0,
+      wid,
+      X.atoms.WM_CLASS,
+      X.atoms.STRING,
+      0,
+      100
+    );
+    if (wmClassProperty && wmClassProperty.data) {
+      const classString = wmClassProperty.data.toString();
+      const parts = classString.split("\0");
+      return parts[0];
+    }
+    return null;
+  } catch (err) {
+    logToFile(
+      wmLogFilePath,
+      `Failed to fetch app name for wid: ${wid} - ${err}`,
+      LogLevel.ERROR
+    );
+    return null;
+  }
+};
+
 const openApp = async (
   appWid: number,
   splitDirection: number,
   currentWindowId?: number
 ): Promise<void> => {
+  // logToFile(wmLogFilePath, `Opening: ${await fetchAppName(appWid)}`);
   // Verify that app is GUI application before launching
   const isGuiApp = await checkIfGuiApp(appWid);
 
   if (!isGuiApp) return;
+
+  // logToFile(
+  //   wmLogFilePath,
+  //   `${fetchAppName(appWid)} is a gui application :D`,
+  //   LogLevel.DEBUG
+  // );
+
   openedWindows.add(appWid);
 
-  if (!currentWindowId) {
-    // If no currentWindowId is provided, set the app to fullscreen
-    X.ReparentWindow(appWid, desktopWid, 0, 0);
-    X.ResizeWindow(appWid, screen.width, screen.height);
-    X.MapWindow(appWid);
-    return;
+  if (openedWindows.size === 1) {
+    X.ResizeWindow(appWid, screen.width_in_pixels, screen.height_in_pixels);
   }
 
   // Fetch geometry for all windows
@@ -292,6 +259,96 @@ const openApp = async (
     updatedCurrentWindowDimensions.height
   );
   return;
+};
+
+const initX11Client = () => {
+  createClient((err, display: XDisplay) => {
+    if (err) {
+      logToFile(
+        wmLogFilePath,
+        `Error in X11 connection:${err}`,
+        LogLevel.ERROR
+      );
+      return;
+    }
+
+    X = display.client;
+    desktopWid = initDesktop(display);
+
+    logToFile(wmLogFilePath, "Getting PROPERTY", LogLevel.DEBUG);
+    GetPropertyAsync = promisify(X.GetProperty).bind(X);
+
+    X.ChangeWindowAttributes(root, {
+      eventMask: X.eventMask.SubstructureNotify,
+    });
+
+    // Capture keyboard, mouse, and window events
+
+    X.on("event", async (ev) => {
+      // logToFile(
+      //   wmLogFilePath,
+      //   `wid=${ev.wid} name=${await fetchAppName(ev.wid)}`
+      // );
+
+      if (["KeyPress", "KeyRelease"].includes(ev.name)) {
+        if (currentWindowId) {
+          X.SendEvent(false, currentWindowId, true, X.eventMask[ev.name], ev);
+        }
+      } else if (ev.name === "ButtonPress") {
+        // Set focus to the clicked window
+        X.SetInputFocus(ev.wid);
+      } else if (ev.name === "FocusIn") {
+        // Update currentWindowId when a window gains focus
+        currentWindowId = ev.wid;
+      } else if (ev.name === "FocusOut") {
+        // Try to set currentWindowId to a reasonable fallback
+        if (openedWindows.size === 0) {
+          currentWindowId = null;
+        } else {
+          currentWindowId = Array.from(openedWindows).pop() || null; // Last opened or focused window
+        }
+      }
+
+      // Handle new windows
+      if (ev.name === "CreateNotify") {
+        if (!openedWindows.has(ev.wid)) {
+          openApp(ev.wid, splitDirection, currentWindowId);
+          currentWindowId = ev.wid;
+        } else {
+          logToFile(
+            wmLogFilePath,
+            "Open a new window? No thanks, I already got one.",
+            LogLevel.INFO
+          );
+        }
+      }
+
+      // Handle window closing - this is a simplification
+      if (ev.name === "DestroyNotify") {
+        openedWindows.delete(ev.wid);
+        if (currentWindowId === ev.wid) {
+          if (openedWindows.size === 0) {
+            currentWindowId = null;
+          } else {
+            // Last opened or focused window
+            currentWindowId = Array.from(openedWindows).pop() || null;
+          }
+        }
+      }
+    });
+  });
+};
+
+const addBrowserWindowId = (windowId: number) => {
+  browserWindowIds.add(windowId);
+};
+
+// Get Id to create/map/reparent BrowserWindows, also add to set
+const getElectronWindowId = (browserWindow: BrowserWindow): number => {
+  const nativeHandle = browserWindow.getNativeWindowHandle();
+  const wid = nativeHandle.readUint32LE(0);
+  addBrowserWindowId(wid);
+  return wid;
 };
 
 app.whenReady().then(() => {
@@ -509,7 +566,7 @@ const openAutoComplete = () => {
   openedWindows.add(x11ContainerId);
 
   // Desktop should be root in almost every situation
-  X.CreateWindow(x11ContainerId, desktopWid, 55, 60, 120, 80, 0, 0, 0, 0, {
+  X.CreateWindow(x11ContainerId, desktopWid, x, y, 400, 60, 0, 0, 0, 0, {
     eventMask: eventMask,
     backgroundPixel: 10,
   });
