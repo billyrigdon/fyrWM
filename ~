@@ -46,8 +46,7 @@ const ROOT_WIN_EVENT_MASK =
   x11.eventMask.FocusChange |
   x11.eventMask.PropertyChange |
   x11.eventMask.KeyPress |
-  x11.eventMask.KeyRelease |
-  x11.eventMask.Exposure;
+  x11.eventMask.KeyRelease;
 
 const FRAME_WIN_EVENT_MASK =
   x11.eventMask.StructureNotify |
@@ -305,28 +304,27 @@ const openApp = async (
   splitDirection: number,
   currentWindowId?: number
 ): Promise<void> => {
-  logToFile(wmLogFilePath, `Opening: ${await fetchAppName(appWid)}`);
+  // logToFile(wmLogFilePath, `Opening: ${await fetchAppName(appWid)}`);
   // Verify that app is GUI application before launching
-  // if (appWid === launcherWid && openedWindows.has(launcherWid)) {
-  //   openedWindows.delete(launcherWid);
-  //   return;
-  // } else if (appWid === launcherWid && !openedWindows.has(launcherWid)) {
-  //   // openedWindows.add
-  // }
+  if (launcherWindow) {
+    launcherWindow.close();
+    openedWindows.delete(launcherWid);
+    launcherWid = null;
+  }
 
   const isGuiApp = await checkIfGuiApp(appWid);
 
-  logToFile(
-    wmLogFilePath,
-    appWid.toString() + isGuiApp ? " is a gui app" : " not a gui app",
-    LogLevel.DEBUG
-  );
-
   if (!isGuiApp) return;
 
+  // logToFile(
+  //   wmLogFilePath,
+  //   `${fetchAppName(appWid)} is a gui application :D`,
+  //   LogLevel.DEBUG
+  // );
+
   openedWindows.add(appWid);
-  logToFile(wmLogFilePath, "OPEN WINDOWS: " + openedWindows, LogLevel.DEBUG);
-  if (openedWindows.size === 1) {
+
+  if (openedWindows.size === 2) {
     X.ResizeWindow(appWid, screen.width_in_pixels, screen.height_in_pixels);
   }
 
@@ -393,8 +391,6 @@ const openApp = async (
     );
   }
 
-  logToFile(wmLogFilePath, JSON.stringify(newDimensions), LogLevel.DEBUG);
-
   // Make the desktop the parent
   // Resize the new window
   X.ReparentWindow(appWid, desktopWid, newDimensions.x, newDimensions.y);
@@ -428,7 +424,7 @@ async function onKeyPress(ev: IXKeyEvent) {
     LogLevel.DEBUG
   );
   if (currentWindowId) {
-    X.SendEvent(currentWindowId, false, x11.eventMask[ev.name], {});
+    X.SendEvent(ev.wid, false, x11.eventMask[ev.name], {});
   }
 }
 
@@ -465,7 +461,7 @@ const initX11Client = async () => {
 
     // Capture keyboard, mouse, and window events
     client.on("event", async (ev: IXEvent) => {
-      logToFile(wmLogFilePath, JSON.stringify(ev), LogLevel.DEBUG);
+      logToFile(wmLogFilePath, ev.name.toString(), LogLevel.DEBUG);
       logToFile(wmLogFilePath, ev.name.toString(), LogLevel.DEBUG);
       const { type } = ev;
       switch (type) {
@@ -514,7 +510,7 @@ const initX11Client = async () => {
         case X11_EVENT_TYPE.Expose:
           break;
         case X11_EVENT_TYPE.CreateNotify:
-          if (!openedWindows.has(ev.wid)) {
+          if (!openedWindows.has(ev.wid) && ev.wid !== launcherWid) {
             openApp(ev.wid, splitDirection, currentWindowId);
             currentWindowId = ev.wid;
           } else if (ev.wid === launcherWid) {
@@ -609,14 +605,8 @@ app.whenReady().then(() => {
 
   // App launcher
   const launcherShortcut = globalShortcut.register("Super+Space", () => {
-    logToFile(wmLogFilePath, "Toggling launcher", LogLevel.INFO);
-    if (launcherWid && launcherWindow.isVisible) {
-      launcherWindow.hide();
-    } else if (launcherWid && !launcherWindow.isVisible) {
-      launcherWindow.show();
-    } else {
-      openLauncher();
-    }
+    logToFile(wmLogFilePath, "Opening launcher", LogLevel.INFO);
+    openLauncher();
   });
   if (!launcherShortcut) {
     logToFile(
@@ -689,6 +679,7 @@ app.whenReady().then(() => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     // Unregister all shortcuts.
+    app.quit();
   }
 });
 
@@ -786,18 +777,19 @@ const openLauncher = () => {
     },
   });
 
-  launcherWindow.webContents.loadFile("./dist/vue/app-launcher.html");
+  launcherWindow.loadFile("./dist/vue/app-launcher.html");
 
   launcherWindow.setFullScreen(false);
   launcherWindow.setFocusable(true);
   launcherWindow.setAlwaysOnTop(true);
   launcherWid = getElectronWindowId(launcherWindow);
+  openedWindows.add(launcherWid);
+
   /* 
     Reparent Electron container into x11 window container
     TODO: Wrap this into new function
   */
   // Desktop should be root in almost every situation
-  X.ReparentWindow(launcherWid, desktopWid, x, y);
   X.MapWindow(launcherWid);
   logToFile(wmLogFilePath, launcherWid.toString(), LogLevel.DEBUG);
 };

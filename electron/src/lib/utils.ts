@@ -33,7 +33,8 @@ export const logToFile = async (
   level: LogLevel = LogLevel.INFO
 ): Promise<void> => {
   const timestamp = new Date().toISOString();
-  const logMessage = `${levelColor[level]} [${timestamp}] ${message}\n`;
+  const resetCode = "\x1b[0m";
+  const logMessage = `${levelColor[level]}[${timestamp}] ${message}${resetCode}\n`;
 
   try {
     // Check if the file exists
