@@ -2,7 +2,12 @@ import { exec as nativeExec } from "child_process";
 import os from "os";
 import { mkdir, appendFile, writeFile, access, constants } from "fs/promises";
 import path, { join } from "path";
-
+export interface IBounds {
+  top: number;
+  left: number;
+  bottom: number;
+  right: number;
+}
 export enum LogLevel {
   INFO = "INFO",
   WARN = "WARN",

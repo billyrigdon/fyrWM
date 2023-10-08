@@ -93,6 +93,7 @@ export interface IXEvent {
   format: number;
   wid: number;
   rawData: Buffer;
+  message_type: number;
 }
 
 export interface IXConfigureInfo {
@@ -715,6 +716,7 @@ export interface IXClient {
   UnmapWindow(winId: number): void;
   WarpPointer(...args: unknown[]): unknown;
 }
+
 
 export interface IX11Client {
   on(eventName: "event", callback: (ev: IXEvent) => void): void;

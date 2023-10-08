@@ -5,12 +5,8 @@
     "strict": false,
     "outDir": "./dist",
     "esModuleInterop": true,
-    "moduleResolution": "Node",
+    "moduleResolution": "Node"
   },
-  "include": [
-    "electron/**/*.ts",
-    "vue/**/*.ts",
-    "vue/**/*.d.ts"
-  ],
+  "include": ["electron/**/*.ts", "vue/**/*.ts", "vue/**/*.d.ts"],
   "exclude": ["node_modules"]
 }
