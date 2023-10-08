@@ -5,8 +5,9 @@ import ini from "ini";
 import fs from "fs";
 import path, { join } from "path";
 import { FyrConfig } from "./types/FyrTypes";
-import { logToFile, LogLevel } from "./lib/shared";
+import { logToFile, LogLevel, homedir, exec } from "./lib/shared";
 import { promisify } from "util";
+import { defaultFyrConfig } from "./lib/config";
 
 enum SplitDirection {
   Horizontal = 0,
@@ -20,35 +21,62 @@ interface WindowGeometry {
   y?: number;
 }
 
+// Globals
 const wmLogFilePath = join(homedir(), ".fyr", "logs", "wm.log");
-
 let X: XClient;
 let root: number;
 let desktopWindow: BrowserWindow;
 let desktopWid: number;
+let currentWindowId: number | null = null;
+let screen = null;
 
 let splitDirection = SplitDirection.Horizontal;
-
 // Tracks electron windows
 const browserWindowIds: Set<number> = new Set();
-
 // Track all open x11 windows
 const openedWindows: Set<number> = new Set();
 
-// Get user settings.
+// Get user settings. Called immediately
 const config: FyrConfig = (() => {
-  const configPath = path.join(process.env.HOME!, ".fyr/wm/config.json");
-  const rawData = fs.readFileSync(configPath, "utf-8");
-  return JSON.parse(rawData);
+  const homeDir = process.env.HOME;
+  if (!homeDir) {
+    throw new Error("HOME directory is not set.");
+  }
+  const configPath = path.join(homeDir, ".fyr/wm/config.json");
+
+  try {
+    const rawData = fs.readFileSync(configPath, "utf-8");
+    return JSON.parse(rawData);
+  } catch (err) {
+    logToFile(
+      wmLogFilePath,
+      `Could not read config file, creating a new one with default setting`,
+      LogLevel.DEBUG
+    );
+    const dirPath = path.dirname(configPath);
+    if (!fs.existsSync(dirPath)) {
+      fs.mkdirSync(dirPath, { recursive: true });
+    }
+
+    // Write the default config to the file
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify(defaultFyrConfig, null, 2),
+      "utf-8"
+    );
+
+    return defaultFyrConfig;
+  }
 })();
 
+// Depends on feh package
 const setWallpaper = (wid: number) => {
   const wallpaperPath = config.customizations.wallpaperPath;
   exec(`feh --bg-scale ${wallpaperPath} --window-id ${wid}`, (error) => {
     if (error) {
       logToFile(
         wmLogFilePath,
-        `Failed to set wallpaper: ${error}`,
+        `Failed to set wallpaper: ${error}. Is 'feh' installed?`,
         LogLevel.ERROR
       );
     }
@@ -56,7 +84,7 @@ const setWallpaper = (wid: number) => {
 };
 
 const initDesktop = (display: XDisplay) => {
-  const screen = display.screen[0];
+  screen = display.screen[0];
   root = screen.root;
   const width = screen.pixel_width;
   const height = screen.pixel_height;
@@ -89,31 +117,50 @@ const initX11Client = () => {
     });
 
     // Capture keyboard, mouse, and window events
-    let focusedWindowId: number;
+
     X.on("event", (ev) => {
-      // Pass keyboard input to focused windows
       if (ev.name === "KeyPress") {
-        if (focusedWindowId) {
-          X.SendEvent(false, focusedWindowId, true, X.eventMask.KeyPress, ev);
+        // Forward key press event to the currently focused window
+        if (currentWindowId) {
+          X.SendEvent(false, currentWindowId, true, X.eventMask.KeyPress, ev);
         }
       } else if (ev.name === "FocusIn") {
-        focusedWindowId = ev.wid;
+        // Update currentWindowId when a window gains focus
+        currentWindowId = ev.wid;
       } else if (ev.name === "FocusOut") {
-        focusedWindowId = null;
+        // Try to set currentWindowId to a reasonable fallback
+        if (openedWindows.size === 0) {
+          currentWindowId = null;
+        } else {
+          currentWindowId = Array.from(openedWindows).pop() || null; // Last opened or focused window
+        }
       }
 
-      // Map applications
+      // Handle new windows
       if (ev.name === "CreateNotify") {
         if (!openedWindows.has(ev.wid)) {
-          // openApp(ev.wid);
-          openedWindows.add(ev.wid);
+          openApp(ev.wid, splitDirection, currentWindowId);
+          currentWindowId = ev.wid;
+        } else {
+          logToFile(
+            wmLogFilePath,
+            "Open a new window? No thanks, I already got one.",
+            LogLevel.INFO
+          );
         }
-      } else {
-        logToFile(
-          wmLogFilePath,
-          "Open a new window? No thanks, I already got one.",
-          LogLevel.INFO
-        );
+      }
+
+      // Handle window closing - this is a simplification
+      if (ev.name === "DestroyNotify") {
+        openedWindows.delete(ev.wid);
+        if (currentWindowId === ev.wid) {
+          if (openedWindows.size === 0) {
+            currentWindowId = null;
+          } else {
+            // Last opened or focused window
+            currentWindowId = Array.from(openedWindows).pop() || null;
+          }
+        }
       }
     });
   });
@@ -129,50 +176,6 @@ const getElectronWindowId = (browserWindow: BrowserWindow): number => {
   const wid = nativeHandle.readUint32LE(0);
   addBrowserWindowId(wid);
   return wid;
-};
-
-const openAutoComplete = () => {
-  const autoCompleteWindow = new BrowserWindow({
-    width: 120,
-    height: 70,
-    x: 0,
-    y: 0,
-    frame: false,
-    alwaysOnTop: true,
-    resizable: false,
-    movable: false,
-    focusable: true,
-    skipTaskbar: true,
-    webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false,
-    },
-  });
-  autoCompleteWindow.loadFile("./dist/vue/app-launcher.html");
-  autoCompleteWindow.setFullScreen(false);
-  autoCompleteWindow.setFocusable(true);
-  autoCompleteWindow.setAlwaysOnTop(true);
-  const desktopWid = getElectronWindowId(desktopWindow);
-  const autocompleteWid = getElectronWindowId(autoCompleteWindow);
-
-  openedWindows.add(autocompleteWid);
-
-  /* 
-    Reparent Electron container into x11 window container
-    TODO: Wrap this into new function
-  */
-  const x11ContainerId = X.AllocID();
-  openedWindows.add(x11ContainerId);
-
-  // Desktop should be root in almost every situation
-  X.CreateWindow(x11ContainerId, desktopWid, 55, 60, 120, 80, 0, 0, 0, 0, {
-    eventMask: eventMask,
-    backgroundPixel: 10,
-  });
-
-  X.MapWindow(x11ContainerId);
-  X.ReparentWindow(autocompleteWid, x11ContainerId, 0, 0);
-  X.MapWindow(autocompleteWid);
 };
 
 const getWindowGeometry = (windowId: number): Promise<any> => {
@@ -235,10 +238,21 @@ const checkIfGuiApp = async (windowId: number): Promise<boolean> => {
 const openApp = async (
   appWid: number,
   splitDirection: number,
-  currentWindowId: number
-) => {
+  currentWindowId?: number
+): Promise<void> => {
   // Verify that app is GUI application before launching
   const isGuiApp = await checkIfGuiApp(appWid);
+
+  if (!isGuiApp) return;
+  openedWindows.add(appWid);
+
+  if (!currentWindowId) {
+    // If no currentWindowId is provided, set the app to fullscreen
+    X.ReparentWindow(appWid, desktopWid, 0, 0);
+    X.ResizeWindow(appWid, screen.width, screen.height);
+    X.MapWindow(appWid);
+    return;
+  }
 
   // Fetch geometry for all windows
   const allWindowDimensions = [];
@@ -304,7 +318,7 @@ const openApp = async (
   }
 
   // Make the desktop the parent
-  // Reparent and resize the new window
+  // Resize the new window
   X.ReparentWindow(appWid, desktopWid, newDimensions.x, newDimensions.y);
   X.ResizeWindow(appWid, newDimensions.width, newDimensions.height);
   X.MapWindow(appWid);
@@ -315,25 +329,93 @@ const openApp = async (
     updatedCurrentWindowDimensions.width,
     updatedCurrentWindowDimensions.height
   );
+  return;
 };
 
 app.whenReady().then(() => {
   initX11Client();
-  const autocompleteShortcut = globalShortcut.register("Control+Space", () => {
-    console.log("Control+Space is pressed");
-    // controlSpacePressed = true;
+
+  /*
+   --------------------- Keyboard shortcuts!--------------
+    TODO: Add more
+  */
+
+  // App launcher
+  const autocompleteShortcut = globalShortcut.register("Super+Space", () => {
+    logToFile(wmLogFilePath, "Opening launcher", LogLevel.INFO);
     openAutoComplete();
   });
   if (!autocompleteShortcut) {
-    console.log("registration failed");
+    logToFile(
+      wmLogFilePath,
+      "Launcher keyboard registration failed :(",
+      LogLevel.ERROR
+    );
   }
 
-  const closeAppShortcut = globalShortcut.register("Super+Shift+Q", () => {
-    console.log("Super+Shift+Q is pressed");
-    app.quit();
+  // Exit WM if ctrl+alt+del pressed 3 times
+  let counter = 0;
+  let timerId: NodeJS.Timeout | null = null;
+
+  const resetCounter = () => {
+    counter = 0;
+  };
+
+  const closeAppShortcut = globalShortcut.register("Ctrl+Alt+Delete", () => {
+    counter++;
+
+    if (timerId) {
+      clearTimeout(timerId);
+    }
+
+    timerId = setTimeout(resetCounter, 2000); // reset the counter if 2 seconds pass between key presses
+
+    if (counter >= 3) {
+      logToFile(wmLogFilePath, "Closing desktop environment", LogLevel.INFO);
+      app.quit();
+    }
   });
   if (!closeAppShortcut) {
-    console.log("Super+Shift+Q registration failed");
+    logToFile(
+      wmLogFilePath,
+      "You can check out any time you like, but you can never leave..",
+      LogLevel.ERROR
+    );
+  }
+
+  // Window split directions
+  const horizontalSplitShortcut = globalShortcut.register("Super+H", () => {
+    logToFile(
+      wmLogFilePath,
+      "Setting split direction to horizontal",
+      LogLevel.INFO
+    );
+    splitDirection = SplitDirection.Horizontal; // Assuming SplitDirection is an enum you've defined
+  });
+
+  if (!horizontalSplitShortcut) {
+    logToFile(
+      wmLogFilePath,
+      "Horizontal split keyboard registration failed :(",
+      LogLevel.ERROR
+    );
+  }
+
+  const verticalSplitShortcut = globalShortcut.register("Super+V", () => {
+    logToFile(
+      wmLogFilePath,
+      "Setting split direction to vertical",
+      LogLevel.INFO
+    );
+    splitDirection = SplitDirection.Vertical; // Assuming SplitDirection is an enum you've defined
+  });
+
+  if (!verticalSplitShortcut) {
+    logToFile(
+      wmLogFilePath,
+      "Vertical split keyboard registration failed :(",
+      LogLevel.ERROR
+    );
   }
 
   app.on("activate", () => {
@@ -360,12 +442,20 @@ ipcMain.on("onLaunchApp", (event, appCommand) => {
   });
 
   child.on("error", (error) => {
-    console.error(`Failed to start child process: ${error}`);
+    logToFile(
+      wmLogFilePath,
+      `Failed to start child process: ${error}`,
+      LogLevel.ERROR
+    );
   });
 
   child.on("exit", (code) => {
     if (code !== null) {
-      console.log(`Child process exited with code ${code}`);
+      logToFile(
+        wmLogFilePath,
+        `Child process exited with code ${code}`,
+        LogLevel.DEBUG
+      );
     }
   });
 });
@@ -386,9 +476,9 @@ ipcMain.handle("getApps", async () => {
         if (file.endsWith(".desktop")) {
           const filePath = `${path}/${file}`;
           const data = fs.readFileSync(filePath, "utf-8");
-          const config = ini.parse(data);
+          const appConfig = ini.parse(data);
 
-          const desktopEntry = config["Desktop Entry"];
+          const desktopEntry = appConfig["Desktop Entry"];
           if (desktopEntry && desktopEntry.Name && desktopEntry.Exec) {
             apps.push({
               name: desktopEntry.Name,
@@ -398,15 +488,63 @@ ipcMain.handle("getApps", async () => {
         }
       }
     } catch (err) {
-      console.error(`Could not read directory ${path}: ${err}`);
+      logToFile(
+        wmLogFilePath,
+        `Could not read directory ${path}: ${err}`,
+        LogLevel.ERROR
+      );
     }
   }
 
   return apps;
 });
-function exec(arg0: string, arg1: (error: any) => void) {
-  throw new Error("Function not implemented.");
-}
-function homedir(): string {
-  throw new Error("Function not implemented.");
-}
+
+const openAutoComplete = () => {
+  const [width, height] = [screen.pixel_width, screen.pixel_height];
+
+  // Calculate the x and y coordinates to center the window
+  const x = Math.round((width - 400) / 2);
+  const y = Math.round((height - 60) / 2);
+
+  const autoCompleteWindow = new BrowserWindow({
+    width: 400,
+    height: 60,
+    x,
+    y,
+    frame: false,
+    alwaysOnTop: true,
+    resizable: false,
+    movable: false,
+    focusable: true,
+    skipTaskbar: true,
+    backgroundColor: "#ffffff", // white background
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false,
+    },
+  });
+
+  autoCompleteWindow.loadFile("./dist/vue/app-launcher.html");
+
+  autoCompleteWindow.setFullScreen(false);
+  autoCompleteWindow.setFocusable(true);
+  autoCompleteWindow.setAlwaysOnTop(true);
+  const autocompleteWid = getElectronWindowId(autoCompleteWindow);
+  openedWindows.add(autocompleteWid);
+  /* 
+    Reparent Electron container into x11 window container
+    TODO: Wrap this into new function
+  */
+  const x11ContainerId = X.AllocID();
+  openedWindows.add(x11ContainerId);
+
+  // Desktop should be root in almost every situation
+  X.CreateWindow(x11ContainerId, desktopWid, 55, 60, 120, 80, 0, 0, 0, 0, {
+    eventMask: eventMask,
+    backgroundPixel: 10,
+  });
+
+  X.MapWindow(x11ContainerId);
+  X.ReparentWindow(autocompleteWid, x11ContainerId, 0, 0);
+  X.MapWindow(autocompleteWid);
+};
