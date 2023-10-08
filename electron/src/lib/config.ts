@@ -2,7 +2,7 @@ import { FyrConfig } from "../types/FyrTypes";
 
 export const defaultFyrConfig: FyrConfig = {
   customizations: {
-    wallpaperPath: "/path/to/wallpaper",
+    wallpaperPath: "~/Wallpapers/Richard-Stallman.png",
     accentColor: "#FF5733",
     theme: "dark",
   },

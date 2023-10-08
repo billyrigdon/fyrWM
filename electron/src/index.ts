@@ -29,8 +29,9 @@ let desktopWindow: BrowserWindow;
 let desktopWid: number;
 let currentWindowId: number | null = null;
 let screen = null;
-
+let GetPropertyAsync: (...args) => Promise<any>;
 let splitDirection = SplitDirection.Horizontal;
+
 // Tracks electron windows
 const browserWindowIds: Set<number> = new Set();
 // Track all open x11 windows
@@ -112,6 +113,8 @@ const initX11Client = () => {
     X = display.client;
     desktopWid = initDesktop(display);
 
+    GetPropertyAsync = promisify(X.GetProperty).bind(X);
+
     X.ChangeWindowAttributes(root, {
       eventMask: X.eventMask.SubstructureNotify,
     });
@@ -190,47 +193,6 @@ const getWindowGeometry = (windowId: number): Promise<any> => {
       });
     });
   });
-};
-
-const GetPropertyAsync = promisify(X.GetProperty).bind(X);
-
-const checkIfGuiApp = async (windowId: number): Promise<boolean> => {
-  try {
-    const prop = await GetPropertyAsync(
-      0,
-      windowId,
-      X.atoms["_NET_WM_WINDOW_TYPE"],
-      X.atoms["CARDINAL"],
-      0,
-      4
-    );
-
-    if (prop.data && prop.data.length) {
-      // Check if it's a normal or dialog window, these are usually GUI apps
-      const isGui =
-        prop.data.includes(X.atoms["_NET_WM_WINDOW_TYPE_NORMAL"]) ||
-        prop.data.includes(X.atoms["_NET_WM_WINDOW_TYPE_DIALOG"]);
-
-      if (isGui) {
-        logToFile(
-          wmLogFilePath,
-          `${windowId} is a GUI application. Launching now.`,
-          LogLevel.INFO
-        );
-      }
-
-      return isGui;
-    } else {
-      return false;
-    }
-  } catch (err) {
-    logToFile(
-      wmLogFilePath,
-      `An error occurred while checking if ${windowId} is a GUI application: ${err}`,
-      LogLevel.ERROR
-    );
-    throw err; // Or return false if you prefer
-  }
 };
 
 // Create X11 container window with desktop as parent
@@ -401,16 +363,24 @@ app.whenReady().then(() => {
     );
   }
 
-  const verticalSplitShortcut = globalShortcut.register("Super+V", () => {
-    logToFile(
-      wmLogFilePath,
-      "Setting split direction to vertical",
-      LogLevel.INFO
-    );
-    splitDirection = SplitDirection.Vertical; // Assuming SplitDirection is an enum you've defined
-  });
+  try {
+    const verticalSplitShortcut = globalShortcut.register("Super+V", () => {
+      logToFile(
+        wmLogFilePath,
+        "Setting split direction to vertical",
+        LogLevel.INFO
+      );
+      splitDirection = SplitDirection.Vertical; // Assuming SplitDirection is an enum you've defined
+    });
 
-  if (!verticalSplitShortcut) {
+    if (!verticalSplitShortcut) {
+      logToFile(
+        wmLogFilePath,
+        "Vertical split keyboard registration failed :(",
+        LogLevel.ERROR
+      );
+    }
+  } catch (err) {
     logToFile(
       wmLogFilePath,
       "Vertical split keyboard registration failed :(",
@@ -547,4 +517,43 @@ const openAutoComplete = () => {
   X.MapWindow(x11ContainerId);
   X.ReparentWindow(autocompleteWid, x11ContainerId, 0, 0);
   X.MapWindow(autocompleteWid);
+};
+
+const checkIfGuiApp = async (windowId: number): Promise<boolean> => {
+  try {
+    const prop = await GetPropertyAsync(
+      0,
+      windowId,
+      X.atoms["_NET_WM_WINDOW_TYPE"],
+      X.atoms["CARDINAL"],
+      0,
+      4
+    );
+
+    if (prop.data && prop.data.length) {
+      // Check if it's a normal or dialog window, these are usually GUI apps
+      const isGui =
+        prop.data.includes(X.atoms["_NET_WM_WINDOW_TYPE_NORMAL"]) ||
+        prop.data.includes(X.atoms["_NET_WM_WINDOW_TYPE_DIALOG"]);
+
+      if (isGui) {
+        logToFile(
+          wmLogFilePath,
+          `${windowId} is a GUI application. Launching now.`,
+          LogLevel.INFO
+        );
+      }
+
+      return isGui;
+    } else {
+      return false;
+    }
+  } catch (err) {
+    logToFile(
+      wmLogFilePath,
+      `An error occurred while checking if ${windowId} is a GUI application: ${err}`,
+      LogLevel.ERROR
+    );
+    throw err; // Or return false if you prefer
+  }
 };
