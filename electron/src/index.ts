@@ -159,6 +159,7 @@ interface WindowGeometry {
   height: number;
   x?: number;
   y?: number;
+  windowId?: number;
 }
 
 // Globals
@@ -245,7 +246,7 @@ const initDesktop = (display: XDisplay) => {
   return root;
 };
 
-const getWindowGeometry = (windowId: number): Promise<any> => {
+const getWindowGeometry = (windowId: number): Promise<WindowGeometry> => {
   return new Promise((resolve, reject) => {
     X.GetGeometry(windowId, (err, geometry) => {
       if (err) {
@@ -303,36 +304,41 @@ const openApp = async (
   splitDirection: number,
   currentWindowId?: number
 ): Promise<void> => {
-  logToFile(wmLogFilePath, `Opening: ${await fetchAppName(appWid)}`);
-  // Verify that app is GUI application before launching
-  // if (appWid === launcherWid && openedWindows.has(launcherWid)) {
-  //   openedWindows.delete(launcherWid);
-  //   return;
-  // } else if (appWid === launcherWid && !openedWindows.has(launcherWid)) {
-  //   // openedWindows.add
-  // }
-
-  if (!openedWindows.has(appWid)) return;
-
-  //const isGuiApp = await checkIfGuiApp(appWid);
-
-  //logToFile(
-  //  wmLogFilePath,
-  //  appWid.toString() + isGuiApp ? " is a gui app" : " not a gui app",
-  //  LogLevel.DEBUG
-  //);
-
-  //if (!isGuiApp) return;
+  logToFile(
+    wmLogFilePath,
+    "OPEN WINDOWS:" + openedWindows.size.toString(),
+    LogLevel.DEBUG
+  );
 
   openedWindows.add(appWid);
-  logToFile(wmLogFilePath, "OPEN WINDOWS: " + openedWindows, LogLevel.DEBUG);
-  logToFile(wmLogFilePath, openedWindows.size.toString(), LogLevel.DEBUG);
-  if (openedWindows.size === 1) {
-    X.ResizeWindow(appWid, screen.width_in_pixels, screen.height_in_pixels);
+
+  if (appWid === launcherWid) {
+    X.MapWindow(launcherWid);
+    return;
   }
-  //
+
+  if (openedWindows.size === 1) {
+    X.ReparentWindow(
+      appWid,
+      desktopWid,
+      screen.width_in_pixels,
+      screen.height_in_pixels
+    );
+    X.ResizeWindow(appWid, screen.width_in_pixels, screen.height_in_pixels);
+    X.ChangeWindowAttributes(
+      appWid,
+      {
+        eventMask: ROOT_WIN_EVENT_MASK,
+      },
+      (err) => {
+        logToFile(wmLogFilePath, err.toString(), LogLevel.DEBUG);
+      }
+    );
+    X.MapWindow(appWid);
+    return;
+  }
   // Fetch geometry for all windows
-  const allWindowDimensions = [];
+  const allWindowDimensions: WindowGeometry[] = [];
   const geometryPromises = Array.from(openedWindows).map(getWindowGeometry);
   try {
     const geometries = await Promise.all(geometryPromises);
@@ -420,19 +426,6 @@ const openApp = async (
   return;
 };
 
-async function onKeyPress(ev: IXKeyEvent) {
-  const { wid } = ev;
-  logToFile(wmLogFilePath, "onKeyPress", LogLevel.INFO);
-  logToFile(
-    wmLogFilePath,
-    "Current window while keyboarding: " + currentWindowId.toString(),
-    LogLevel.DEBUG
-  );
-  if (currentWindowId) {
-    X.SendEvent(currentWindowId, false, x11.eventMask[ev.name], {});
-  }
-}
-
 const initX11Client = async () => {
   client = createClient((err, display: XDisplay) => {
     if (err) {
@@ -447,7 +440,7 @@ const initX11Client = async () => {
     X = display.client;
     desktopWid = initDesktop(display);
 
-    logToFile(wmLogFilePath, "Getting PROPERTY", LogLevel.DEBUG);
+    logToFile(wmLogFilePath, "Getting PROPERTY", LogLevel.INFO);
     GetPropertyAsync = promisify(X.GetProperty).bind(X);
 
     X.ChangeWindowAttributes(
@@ -466,22 +459,15 @@ const initX11Client = async () => {
 
     // Capture keyboard, mouse, and window events
     client.on("event", async (ev: IXEvent) => {
-      // logToFile(wmLogFilePath, JSON.stringify(ev), LogLevel.DEBUG);
-      // logToFile(wmLogFilePath, ev.name.toString(), LogLevel.DEBUG);
       const { type } = ev;
       switch (type) {
         case X11_EVENT_TYPE.KeyPress:
-          onKeyPress(ev as IXKeyEvent);
+          //  onKeyPress(ev as IXKeyEvent);
           forwardKeyPress(ev);
           break;
         case X11_EVENT_TYPE.KeyRelease:
           break;
         case X11_EVENT_TYPE.ButtonPress:
-          logToFile(
-            wmLogFilePath,
-            "Current mouse click window:" + currentWindowId.toString(),
-            LogLevel.DEBUG
-          );
           // Set focus to the clicked window
           X.SetInputFocus(PointerRoot, XFocusRevertTo.PointerRoot);
           forwardButtonPress(ev);
@@ -495,41 +481,28 @@ const initX11Client = async () => {
         case X11_EVENT_TYPE.LeaveNotify:
           break;
         case X11_EVENT_TYPE.FocusIn:
-          // logToFile(wmLogFilePath, ev.format.toString, LogLevel.DEBUG);
-          logToFile(
-            wmLogFilePath,
-            "Focusing...focusing....⭐" + currentWindowId.toString(),
-            LogLevel.DEBUG
-          );
           // Update currentWindowId when a window gains focus
           currentWindowId = ev.wid;
+          logToFile(wmLogFilePath, ev.name, LogLevel.ERROR);
           break;
         case X11_EVENT_TYPE.FocusOut:
           // Try to set currentWindowId to a reasonable fallback
           if (openedWindows.size === 0) {
             currentWindowId = null;
           } else {
-            currentWindowId = Array.from(openedWindows).pop() || null; // Last opened or focused window
+            currentWindowId = Array.from(openedWindows).pop() || null;
           }
           break;
         case X11_EVENT_TYPE.Expose:
           break;
         case X11_EVENT_TYPE.CreateNotify:
-          if (!openedWindows.has(ev.wid)) {
-            openApp(ev.wid, splitDirection, currentWindowId);
-            currentWindowId = ev.wid;
-          } else if (ev.wid === launcherWid) {
-            logToFile(wmLogFilePath, "A LAUNCH BOX? FOR LAUNCH!🐶");
-          } else {
-            logToFile(
-              wmLogFilePath,
-              "Open a new window? No thanks, I already got one 🧽",
-              LogLevel.INFO
-            );
-          }
+          openApp(ev.wid, splitDirection, currentWindowId);
+          //currentWindowId = ev.wid;
           break;
         case X11_EVENT_TYPE.DestroyNotify:
-          openedWindows.delete(ev.wid);
+          if (openedWindows.has(ev.wid)) {
+            openedWindows.delete(ev.wid);
+          }
           if (currentWindowId === ev.wid) {
             if (openedWindows.size === 0) {
               currentWindowId = null;
@@ -552,8 +525,6 @@ const initX11Client = async () => {
         case X11_EVENT_TYPE.ConfigureRequest:
           break;
         case X11_EVENT_TYPE.ClientMessage:
-          logToFile(wmLogFilePath, JSON.stringify(ev));
-          // X.SendEvent(ev.wid, true, ev.message_type, ev.name);
           break;
         case X11_EVENT_TYPE.PropertyNotify:
           break;
@@ -583,14 +554,6 @@ const initX11Client = async () => {
 
       X.SendEvent(destination, propagate, eventMask, eventRawData);
     };
-
-    client.on("event", async (ev: IXEvent) => {
-      logToFile(wmLogFilePath, ev.name.toString(), LogLevel.DEBUG);
-      logToFile(wmLogFilePath, ev.name.toString(), LogLevel.DEBUG);
-      // Handle window closing - this is a simplification
-      if (ev.name === "DestroyNotify") {
-      }
-    });
   });
 };
 
@@ -602,7 +565,6 @@ const getElectronWindowId = (browserWindow: BrowserWindow): number => {
 
 app.whenReady().then(() => {
   initX11Client();
-
   /*
    --------------------- Keyboard shortcuts!--------------
     TODO: Add more
@@ -706,8 +668,6 @@ ipcMain.on("onLaunchApp", (event, appCommand) => {
     shell: true,
   });
   launcherWindow.hide();
-  //launcherWindow.close();
-  //launcherWindow = null;
 
   child.on("error", (error) => {
     logToFile(
@@ -729,10 +689,7 @@ ipcMain.on("onLaunchApp", (event, appCommand) => {
 });
 
 ipcMain.handle("getApps", async () => {
-  const appPaths = [
-    "/usr/share/applications",
-    // Add other paths if needed
-  ];
+  const appPaths = ["/usr/share/applications"];
 
   const apps = [];
 
@@ -802,15 +759,6 @@ const openLauncher = () => {
   launcherWindow.setFocusable(true);
   launcherWindow.setAlwaysOnTop(true);
   launcherWid = getElectronWindowId(launcherWindow);
-
-  /* 
-    Reparent Electron container into x11 window container
-    TODO: Wrap this into new function
-  */
-  // Desktop should be root in almost every situation
-  //X.ReparentWindow(launcherWid, desktopWid, x, y);
-  //X.MapWindow(launcherWid);
-  logToFile(wmLogFilePath, launcherWid.toString(), LogLevel.DEBUG);
 };
 
 const checkIfGuiApp = async (windowId: number): Promise<boolean> => {
