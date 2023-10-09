@@ -36,3 +36,16 @@ enum LogLevel {
   ERROR = 'ERROR',
   DEBUG = 'DEBUG'
 }
+
+export enum SplitDirection {
+  Horizontal = 0,
+  Vertical = 1,
+}
+
+export interface WindowGeometry {
+  width: number;
+  height: number;
+  x?: number;
+  y?: number;
+  windowId?: number;
+}

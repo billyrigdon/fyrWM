@@ -1,3 +1,5 @@
+import { IBounds } from "../lib/utils";
+
 export enum X11_EVENT_TYPE {
   KeyPress = 2,
   KeyRelease = 3,
@@ -729,3 +731,95 @@ export interface IX11Mod {
 
   createClient(callback: XCbWithErr<[display: IXDisplay]>): IX11Client;
 }
+
+
+export const ExtraAtoms = {
+  UTF8_STRING: -1,
+
+  WM_PROTOCOLS: 10000,
+  WM_DELETE_WINDOW: 10001,
+
+  _NET_WM_NAME: 340,
+};
+
+export enum XWMWindowType {
+  Other = 0,
+  Client = 1,
+  Frame = 2,
+  Desktop = 3,
+}
+
+export interface XWMEventConsumerArgs {
+  wid: number;
+}
+
+export interface XWMEventConsumerArgsWithType extends XWMEventConsumerArgs {
+  windowType: XWMWindowType;
+}
+
+export interface XWMEventConsumerSetFrameExtentsArgs
+  extends XWMEventConsumerArgs {
+  frameExtents: IBounds;
+}
+
+export interface XWMEventConsumerClientMessageArgs
+  extends XWMEventConsumerArgsWithType {
+  messageType: Atom;
+  data: number[];
+}
+
+export interface XWMEventConsumerScreenCreatedArgs {
+  /** Root window id. */
+  root: number;
+  /** Window id of the desktop window created for the screen. */
+  desktopWindowId: number;
+}
+
+export interface XWMEventConsumerPointerMotionArgs
+  extends XWMEventConsumerArgsWithType {
+  rootx: number;
+  rooty: number;
+}
+
+export interface XWMEventConsumerKeyPressArgs
+  extends XWMEventConsumerArgsWithType {
+  modifiers: X11_KEY_MODIFIER;
+  keycode: number;
+}
+
+export interface IXWMEventConsumer {
+  onScreenCreated?(args: XWMEventConsumerScreenCreatedArgs): void;
+  onClientMessage?(args: XWMEventConsumerClientMessageArgs): void;
+  onMapNotify?(args: XWMEventConsumerArgsWithType): void;
+  onUnmapNotify?(args: XWMEventConsumerArgsWithType): void;
+  onPointerMotion?(args: XWMEventConsumerPointerMotionArgs): void;
+  onButtonRelease?(args: XWMEventConsumerArgsWithType): void;
+  onKeyPress?(args: XWMEventConsumerKeyPressArgs): boolean;
+
+  onSetFrameExtents?(args: XWMEventConsumerSetFrameExtentsArgs): void;
+}
+
+export interface XWMContext {
+  X: IXClient;
+  XDisplay: IXDisplay;
+
+  getWindowIdFromFrameId(wid: number): number | undefined;
+  getFrameIdFromWindowId(wid: number): number | undefined;
+}
+
+export class XServer {
+  // Could put a teardown method here.
+}
+
+export interface IXWMEventConsumer {
+  onScreenCreated?(args: XWMEventConsumerScreenCreatedArgs): void;
+  onClientMessage?(args: XWMEventConsumerClientMessageArgs): void;
+  onMapNotify?(args: XWMEventConsumerArgsWithType): void;
+  onUnmapNotify?(args: XWMEventConsumerArgsWithType): void;
+  onPointerMotion?(args: XWMEventConsumerPointerMotionArgs): void;
+  onButtonRelease?(args: XWMEventConsumerArgsWithType): void;
+  onKeyPress?(args: XWMEventConsumerKeyPressArgs): boolean;
+
+  onSetFrameExtents?(args: XWMEventConsumerSetFrameExtentsArgs): void;
+}
+

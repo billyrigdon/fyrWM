@@ -4,7 +4,7 @@ import { XDisplay, XClient, createClient, eventMask, createWindow } from "x11";
 import ini from "ini";
 import fs from "fs";
 import path, { join } from "path";
-import { FyrConfig } from "./types/FyrTypes";
+import { FyrConfig, SplitDirection, WindowGeometry } from "./types/FyrTypes";
 import { logToFile, LogLevel, homedir, exec } from "./lib/utils";
 import { promisify } from "util";
 import { defaultFyrConfig } from "./lib/config";
@@ -23,144 +23,6 @@ import {
 } from "./types/X11Types";
 import { IBounds } from "./lib/utils";
 const x11: IX11Mod = require("x11");
-
-export const ExtraAtoms = {
-  UTF8_STRING: -1,
-
-  WM_PROTOCOLS: 10000,
-  WM_DELETE_WINDOW: 10001,
-
-  _NET_WM_NAME: 340,
-};
-
-const NO_EVENT_MASK = x11.eventMask.None;
-
-const ROOT_WIN_EVENT_MASK =
-  x11.eventMask.SubstructureRedirect |
-  x11.eventMask.SubstructureNotify |
-  x11.eventMask.EnterWindow |
-  x11.eventMask.LeaveWindow |
-  x11.eventMask.StructureNotify |
-  x11.eventMask.ButtonPress |
-  x11.eventMask.ButtonRelease |
-  x11.eventMask.FocusChange |
-  x11.eventMask.PropertyChange |
-  x11.eventMask.KeyPress |
-  x11.eventMask.KeyRelease |
-  x11.eventMask.Exposure;
-
-const FRAME_WIN_EVENT_MASK =
-  x11.eventMask.StructureNotify |
-  x11.eventMask.EnterWindow |
-  x11.eventMask.LeaveWindow |
-  x11.eventMask.SubstructureRedirect |
-  x11.eventMask.PointerMotion |
-  x11.eventMask.ButtonRelease |
-  x11.eventMask.KeyPress;
-
-const CLIENT_WIN_EVENT_MASK =
-  x11.eventMask.StructureNotify |
-  x11.eventMask.PropertyChange |
-  x11.eventMask.FocusChange |
-  x11.eventMask.PointerMotion;
-
-export enum XWMWindowType {
-  Other = 0,
-  Client = 1,
-  Frame = 2,
-  Desktop = 3,
-}
-
-export interface XWMEventConsumerArgs {
-  wid: number;
-}
-
-export interface XWMEventConsumerArgsWithType extends XWMEventConsumerArgs {
-  windowType: XWMWindowType;
-}
-
-export interface XWMEventConsumerSetFrameExtentsArgs
-  extends XWMEventConsumerArgs {
-  frameExtents: IBounds;
-}
-
-export interface XWMEventConsumerClientMessageArgs
-  extends XWMEventConsumerArgsWithType {
-  messageType: Atom;
-  data: number[];
-}
-
-export interface XWMEventConsumerScreenCreatedArgs {
-  /** Root window id. */
-  root: number;
-  /** Window id of the desktop window created for the screen. */
-  desktopWindowId: number;
-}
-
-export interface XWMEventConsumerPointerMotionArgs
-  extends XWMEventConsumerArgsWithType {
-  rootx: number;
-  rooty: number;
-}
-
-export interface XWMEventConsumerKeyPressArgs
-  extends XWMEventConsumerArgsWithType {
-  modifiers: X11_KEY_MODIFIER;
-  keycode: number;
-}
-
-export interface IXWMEventConsumer {
-  onScreenCreated?(args: XWMEventConsumerScreenCreatedArgs): void;
-  onClientMessage?(args: XWMEventConsumerClientMessageArgs): void;
-  onMapNotify?(args: XWMEventConsumerArgsWithType): void;
-  onUnmapNotify?(args: XWMEventConsumerArgsWithType): void;
-  onPointerMotion?(args: XWMEventConsumerPointerMotionArgs): void;
-  onButtonRelease?(args: XWMEventConsumerArgsWithType): void;
-  onKeyPress?(args: XWMEventConsumerKeyPressArgs): boolean;
-
-  onSetFrameExtents?(args: XWMEventConsumerSetFrameExtentsArgs): void;
-}
-
-export interface XWMContext {
-  X: IXClient;
-  XDisplay: IXDisplay;
-
-  getWindowIdFromFrameId(wid: number): number | undefined;
-  getFrameIdFromWindowId(wid: number): number | undefined;
-}
-
-export function startX(): Promise<void> {
-  return initX11Client();
-}
-
-export class XServer {
-  // Could put a teardown method here.
-}
-
-export interface IXWMEventConsumer {
-  onScreenCreated?(args: XWMEventConsumerScreenCreatedArgs): void;
-  onClientMessage?(args: XWMEventConsumerClientMessageArgs): void;
-  onMapNotify?(args: XWMEventConsumerArgsWithType): void;
-  onUnmapNotify?(args: XWMEventConsumerArgsWithType): void;
-  onPointerMotion?(args: XWMEventConsumerPointerMotionArgs): void;
-  onButtonRelease?(args: XWMEventConsumerArgsWithType): void;
-  onKeyPress?(args: XWMEventConsumerKeyPressArgs): boolean;
-
-  onSetFrameExtents?(args: XWMEventConsumerSetFrameExtentsArgs): void;
-}
-
-enum SplitDirection {
-  Horizontal = 0,
-  Vertical = 1,
-}
-
-interface WindowGeometry {
-  width: number;
-  height: number;
-  x?: number;
-  y?: number;
-  windowId?: number;
-}
 
 // Globals
 const wmLogFilePath = join(homedir(), ".fyr", "logs", "wm.log");
@@ -246,184 +108,22 @@ const initDesktop = (display: XDisplay) => {
   return root;
 };
 
-const getWindowGeometry = (windowId: number): Promise<WindowGeometry> => {
-  return new Promise((resolve, reject) => {
-    X.GetGeometry(windowId, (err, geometry) => {
-      if (err) {
-        return reject(err);
-      }
-      resolve({
-        windowId,
-        ...geometry,
-      });
-    });
-  });
-};
-
-const fetchAppName = async (wid: number): Promise<string | null> => {
-  try {
-    console.log("Debug Atom:", X.atoms.WM_NAME, X.atoms.WM_CLASS); // Debug line
-    const wmNameProperty = await GetPropertyAsync(
-      0,
-      wid,
-      X.atoms.WM_NAME,
-      X.atoms.STRING,
-      0,
-      100
-    );
-    if (wmNameProperty && wmNameProperty.data) {
-      return wmNameProperty.data.toString();
-    }
-    // Fallback to WM_CLASS if _NET_WM_NAME is not available
-    const wmClassProperty = await GetPropertyAsync(
-      0,
-      wid,
-      X.atoms.WM_CLASS,
-      X.atoms.STRING,
-      0,
-      100
-    );
-    if (wmClassProperty && wmClassProperty.data) {
-      const classString = wmClassProperty.data.toString();
-      const parts = classString.split("\0");
-      return parts[0];
-    }
-    return null;
-  } catch (err) {
-    logToFile(
-      wmLogFilePath,
-      `Failed to fetch app name for wid: ${wid} - ${err}`,
-      LogLevel.ERROR
-    );
-    return null;
-  }
-};
-
 const openApp = async (
   appWid: number,
   splitDirection: number,
   currentWindowId?: number
 ): Promise<void> => {
-  logToFile(
-    wmLogFilePath,
-    "OPEN WINDOWS:" + openedWindows.size.toString(),
-    LogLevel.DEBUG
-  );
+  // logToFile(
+  //   wmLogFilePath,
+  //   "OPEN WINDOWS:" + openedWindows.size.toString(),
+  //   LogLevel.DEBUG
+  // );
 
   openedWindows.add(appWid);
 
-  if (appWid === launcherWid) {
-    X.MapWindow(launcherWid);
-    return;
-  }
+  logToFile(wmLogFilePath, "Beginning open map", LogLevel.ERROR);
 
-  if (openedWindows.size === 1) {
-    X.ReparentWindow(
-      appWid,
-      desktopWid,
-      screen.width_in_pixels,
-      screen.height_in_pixels
-    );
-    X.ResizeWindow(appWid, screen.width_in_pixels, screen.height_in_pixels);
-    X.ChangeWindowAttributes(
-      appWid,
-      {
-        eventMask: ROOT_WIN_EVENT_MASK,
-      },
-      (err) => {
-        logToFile(wmLogFilePath, err.toString(), LogLevel.DEBUG);
-      }
-    );
-    X.MapWindow(appWid);
-    return;
-  }
-  // Fetch geometry for all windows
-  const allWindowDimensions: WindowGeometry[] = [];
-  const geometryPromises = Array.from(openedWindows).map(getWindowGeometry);
-  try {
-    const geometries = await Promise.all(geometryPromises);
-    allWindowDimensions.push(...geometries);
-  } catch (err) {
-    logToFile(
-      wmLogFilePath,
-      "Failed to get geometry for some windows: " + err,
-      LogLevel.ERROR
-    );
-    return;
-  }
-
-  // Get size of current window for splitting
-  const currentWindowGeometry = allWindowDimensions.find(
-    (geom) => geom.windowId === currentWindowId
-  );
-  if (!currentWindowGeometry) {
-    logToFile(
-      wmLogFilePath,
-      "Current window geometry not found. You probably fricked up, it's surely not my fault 😏"
-    );
-    return;
-  }
-
-  let newDimensions: WindowGeometry;
-  let updatedCurrentWindowDimensions: WindowGeometry;
-
-  // Calculate new dimensions based on split direction
-  if (splitDirection === SplitDirection.Horizontal) {
-    newDimensions = {
-      width: currentWindowGeometry.width / 2,
-      height: currentWindowGeometry.height,
-      x: currentWindowGeometry.x + currentWindowGeometry.width / 2,
-      y: currentWindowGeometry.y,
-    };
-
-    updatedCurrentWindowDimensions = {
-      width: currentWindowGeometry.width / 2,
-      height: currentWindowGeometry.height,
-    };
-  } else if (splitDirection === SplitDirection.Vertical) {
-    newDimensions = {
-      width: currentWindowGeometry.width,
-      height: currentWindowGeometry.height / 2,
-      x: currentWindowGeometry.x,
-      y: currentWindowGeometry.y + currentWindowGeometry.height / 2,
-    };
-
-    updatedCurrentWindowDimensions = {
-      width: currentWindowGeometry.width,
-      height: currentWindowGeometry.height / 2,
-    };
-  } else {
-    logToFile(
-      wmLogFilePath,
-      "Couldn't get split direction. Something terrible has happened.",
-      LogLevel.ERROR
-    );
-  }
-
-  logToFile(wmLogFilePath, JSON.stringify(newDimensions), LogLevel.DEBUG);
-
-  // Make the desktop the parent
-  // Resize the new window
-  X.ReparentWindow(appWid, desktopWid, newDimensions.x, newDimensions.y);
-  X.ResizeWindow(appWid, newDimensions.width, newDimensions.height);
-  X.ChangeWindowAttributes(
-    appWid,
-    {
-      eventMask: ROOT_WIN_EVENT_MASK,
-    },
-    (err) => {
-      logToFile(wmLogFilePath, err.toString(), LogLevel.DEBUG);
-    }
-  );
   X.MapWindow(appWid);
-
-  // Also resize the currently focused window
-  X.ResizeWindow(
-    currentWindowId,
-    updatedCurrentWindowDimensions.width,
-    updatedCurrentWindowDimensions.height
-  );
-  return;
 };
 
 const initX11Client = async () => {
@@ -439,14 +139,13 @@ const initX11Client = async () => {
 
     X = display.client;
     desktopWid = initDesktop(display);
-
-    logToFile(wmLogFilePath, "Getting PROPERTY", LogLevel.INFO);
-    GetPropertyAsync = promisify(X.GetProperty).bind(X);
+    // GetPropertyAsync = promisify(X.GetProperty).bind(X);
 
     X.ChangeWindowAttributes(
       root,
       {
-        eventMask: x11.eventMask.SubstructureNotify,
+        eventMask:
+          x11.eventMask.SubstructureNotify | x11.eventMask.SubstructureRedirect,
       },
       (err) => {
         logToFile(
@@ -462,17 +161,18 @@ const initX11Client = async () => {
       const { type } = ev;
       switch (type) {
         case X11_EVENT_TYPE.KeyPress:
-          //  onKeyPress(ev as IXKeyEvent);
-          forwardKeyPress(ev);
+          X.SendEvent(ev.wid, true, x11.eventMask.KeyPress, ev.rawData);
           break;
         case X11_EVENT_TYPE.KeyRelease:
+          X.SendEvent(ev.wid, true, x11.eventMask.KeyRelease, ev.rawData);
           break;
         case X11_EVENT_TYPE.ButtonPress:
           // Set focus to the clicked window
           X.SetInputFocus(PointerRoot, XFocusRevertTo.PointerRoot);
-          forwardButtonPress(ev);
+          X.SendEvent(ev.wid, true, x11.eventMask.ButtonPress, ev.rawData);
           break;
         case X11_EVENT_TYPE.ButtonRelease:
+          X.SendEvent(ev.wid, true, x11.eventMask.ButtonRelease, ev.rawData);
           break;
         case X11_EVENT_TYPE.MotionNotify:
           break;
@@ -496,8 +196,11 @@ const initX11Client = async () => {
         case X11_EVENT_TYPE.Expose:
           break;
         case X11_EVENT_TYPE.CreateNotify:
-          openApp(ev.wid, splitDirection, currentWindowId);
           //currentWindowId = ev.wid;
+          break;
+        case X11_EVENT_TYPE.MapRequest:
+          openApp(ev.wid, splitDirection, currentWindowId);
+          currentWindowId = ev.wid;
           break;
         case X11_EVENT_TYPE.DestroyNotify:
           if (openedWindows.has(ev.wid)) {
@@ -532,28 +235,6 @@ const initX11Client = async () => {
           break;
       }
     });
-
-    // Forward a KeyPress event to the currently focused window
-    const forwardKeyPress = (keyEvent: any) => {
-      if (currentWindowId === null) return;
-
-      const destination = currentWindowId;
-      const propagate = false; // Replace with your desired value
-      const eventMask = keyEvent.event_mask || 0; // Replace with your desired mask
-      const eventRawData = keyEvent.rawData;
-
-      X.SendEvent(destination, propagate, eventMask, eventRawData);
-    };
-
-    // Forward a ButtonPress event to the clicked window
-    const forwardButtonPress = (buttonEvent: any) => {
-      const destination = buttonEvent.wid;
-      const propagate = false; // Replace with your desired value
-      const eventMask = buttonEvent.event_mask || 0; // Replace with your desired mask
-      const eventRawData = buttonEvent.rawData;
-
-      X.SendEvent(destination, propagate, eventMask, eventRawData);
-    };
   });
 };
 
@@ -725,11 +406,11 @@ ipcMain.handle("getApps", async () => {
 });
 
 const openLauncher = () => {
-  if (launcherInited) {
-    launcherWindow.show();
-    return;
-  }
-  launcherInited = true;
+  // if (launcherInited) {
+  // launcherWindow.show();
+  // return;
+  // }
+  // launcherInited = true;
   const [width, height] = [screen.pixel_width, screen.pixel_height];
 
   // Calculate the x and y coordinates to center the window
@@ -759,6 +440,9 @@ const openLauncher = () => {
   launcherWindow.setFocusable(true);
   launcherWindow.setAlwaysOnTop(true);
   launcherWid = getElectronWindowId(launcherWindow);
+  X.ReparentWindow(launcherWid, root, x, y);
+  X.MapWindow(launcherWid);
+  X.SetInputFocus(launcherWid, XFocusRevertTo.PointerRoot);
 };
 
 const checkIfGuiApp = async (windowId: number): Promise<boolean> => {
