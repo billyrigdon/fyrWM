@@ -16,6 +16,7 @@ import {
   IXDisplay,
   IXEvent,
   IXKeyEvent,
+  IXScreen,
   PointerRoot,
   X11_EVENT_TYPE,
   X11_KEY_MODIFIER,
@@ -32,7 +33,7 @@ let root: number;
 let desktopWindow: BrowserWindow = null;
 let desktopWid: number;
 let currentWindowId: number | null = null;
-let screen = null;
+let screen: IXScreen = null;
 let GetPropertyAsync: (...args) => Promise<any>;
 let splitDirection = SplitDirection.Horizontal;
 let launcherWid: number = null;
@@ -113,17 +114,27 @@ const openApp = async (
   splitDirection: number,
   currentWindowId?: number
 ): Promise<void> => {
-  // logToFile(
-  //   wmLogFilePath,
-  //   "OPEN WINDOWS:" + openedWindows.size.toString(),
-  //   LogLevel.DEBUG
-  // );
+  logToFile(
+    wmLogFilePath,
+    "currentwindowid:" + currentWindowId,
+    LogLevel.ERROR
+  );
+  logToFile(wmLogFilePath, "launcher id:" + launcherWid, LogLevel.ERROR);
 
-  openedWindows.add(appWid);
+  if (!openedWindows.has(appWid)) openedWindows.add(appWid);
 
-  logToFile(wmLogFilePath, "Beginning open map", LogLevel.ERROR);
+  const filteredWindows = Array.from(openedWindows).filter(
+    (w) => w !== launcherWid
+  );
 
-  X.MapWindow(appWid);
+  if (launcherWid === appWid) X.MapWindow(appWid);
+  if (filteredWindows.length === 1) {
+    X.ResizeWindow(appWid, screen.pixel_width, screen.pixel_height);
+    X.ReparentWindow(appWid, desktopWid, 0, 0);
+    X.MapWindow(appWid);
+  } else {
+    X.MapWindow(appWid);
+  }
 };
 
 const initX11Client = async () => {
@@ -203,6 +214,7 @@ const initX11Client = async () => {
           currentWindowId = ev.wid;
           break;
         case X11_EVENT_TYPE.DestroyNotify:
+          logToFile(wmLogFilePath, JSON.stringify(ev.name), LogLevel.ERROR);
           if (openedWindows.has(ev.wid)) {
             openedWindows.delete(ev.wid);
           }
@@ -406,11 +418,6 @@ ipcMain.handle("getApps", async () => {
 });
 
 const openLauncher = () => {
-  // if (launcherInited) {
-  // launcherWindow.show();
-  // return;
-  // }
-  // launcherInited = true;
   const [width, height] = [screen.pixel_width, screen.pixel_height];
 
   // Calculate the x and y coordinates to center the window
