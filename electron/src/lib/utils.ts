@@ -16,10 +16,10 @@ export enum LogLevel {
 }
 
 const levelColor = {
-  [LogLevel.DEBUG]: "\x1b[32m[DEBUG`]\x1b[0m", // Green
-  [LogLevel.INFO]: "\x1b[33m[INFO]\x1b[0m", // Yellow
-  [LogLevel.ERROR]: "\x1b[31m[ERROR]\x1b[0m", // Red
-  [LogLevel.WARN]: "\x1b[34m[WARN]\x1b[0m", // Blue
+  [LogLevel.DEBUG]: "\x1b[32m", // Green
+  [LogLevel.INFO]: "\x1b[33m", // Yellow
+  [LogLevel.ERROR]: "\x1b[31m", // Red
+  [LogLevel.WARN]: "\x1b[34m", // Blue
 };
 
 export const homedir: () => string = () => {
@@ -27,6 +27,7 @@ export const homedir: () => string = () => {
 };
 
 const wmLogFilePath = join(homedir(), ".fyr", "logs", "wm.log");
+
 export const logToFile = async (
   filePath: string,
   message: string,
@@ -34,7 +35,7 @@ export const logToFile = async (
 ): Promise<void> => {
   const timestamp = new Date().toISOString();
   const resetCode = "\x1b[0m";
-  const logMessage = `${levelColor[level]}[${timestamp}] ${message}${resetCode}\n`;
+  const logMessage = `${levelColor[level]}[${level}][${timestamp}] ${message}${resetCode}\n`;
 
   try {
     // Check if the file exists

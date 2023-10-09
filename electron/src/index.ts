@@ -174,9 +174,11 @@ let GetPropertyAsync: (...args) => Promise<any>;
 let splitDirection = SplitDirection.Horizontal;
 let launcherWid: number = null;
 let launcherWindow: BrowserWindow = null;
+let launcherInited: boolean = false;
+
 // Track all open x11 windows
 const openedWindows: Set<number> = new Set();
-const eventConsumers: IXWMEventConsumer[] = [];
+
 // Get user settings. Called immediately
 const config: FyrConfig = (() => {
   const homeDir = process.env.HOME;
@@ -238,10 +240,6 @@ const initDesktop = (display: XDisplay) => {
   const width = screen.pixel_width;
   const height = screen.pixel_height;
 
-  // const wid = X.AllocID();
-  // X.CreateWindow(wid, root, 0, 0, width, height, 0, 0, 0, 0, {
-  //   eventMask: X.eventMask.Exposure,
-  // });
   X.MapWindow(root);
   setWallpaper(root);
   return root;
@@ -314,22 +312,25 @@ const openApp = async (
   //   // openedWindows.add
   // }
 
-  const isGuiApp = await checkIfGuiApp(appWid);
+  if (!openedWindows.has(appWid)) return;
 
-  logToFile(
-    wmLogFilePath,
-    appWid.toString() + isGuiApp ? " is a gui app" : " not a gui app",
-    LogLevel.DEBUG
-  );
+  //const isGuiApp = await checkIfGuiApp(appWid);
 
-  if (!isGuiApp) return;
+  //logToFile(
+  //  wmLogFilePath,
+  //  appWid.toString() + isGuiApp ? " is a gui app" : " not a gui app",
+  //  LogLevel.DEBUG
+  //);
+
+  //if (!isGuiApp) return;
 
   openedWindows.add(appWid);
   logToFile(wmLogFilePath, "OPEN WINDOWS: " + openedWindows, LogLevel.DEBUG);
+  logToFile(wmLogFilePath, openedWindows.size.toString(), LogLevel.DEBUG);
   if (openedWindows.size === 1) {
     X.ResizeWindow(appWid, screen.width_in_pixels, screen.height_in_pixels);
   }
-
+  //
   // Fetch geometry for all windows
   const allWindowDimensions = [];
   const geometryPromises = Array.from(openedWindows).map(getWindowGeometry);
@@ -465,8 +466,8 @@ const initX11Client = async () => {
 
     // Capture keyboard, mouse, and window events
     client.on("event", async (ev: IXEvent) => {
-      logToFile(wmLogFilePath, JSON.stringify(ev), LogLevel.DEBUG);
-      logToFile(wmLogFilePath, ev.name.toString(), LogLevel.DEBUG);
+      // logToFile(wmLogFilePath, JSON.stringify(ev), LogLevel.DEBUG);
+      // logToFile(wmLogFilePath, ev.name.toString(), LogLevel.DEBUG);
       const { type } = ev;
       switch (type) {
         case X11_EVENT_TYPE.KeyPress:
@@ -609,12 +610,15 @@ app.whenReady().then(() => {
 
   // App launcher
   const launcherShortcut = globalShortcut.register("Super+Space", () => {
-    logToFile(wmLogFilePath, "Toggling launcher", LogLevel.INFO);
-    if (launcherWid && launcherWindow.isVisible) {
+    logToFile(wmLogFilePath, "TOGGLING LAUNCHER", LogLevel.INFO);
+    if (launcherWid && launcherWindow.isVisible()) {
+      logToFile(wmLogFilePath, "HIDING LAUNCHER", LogLevel.INFO);
       launcherWindow.hide();
-    } else if (launcherWid && !launcherWindow.isVisible) {
+    } else if (launcherInited) {
+      logToFile(wmLogFilePath, "SHOWING LAUNCHER", LogLevel.INFO);
       launcherWindow.show();
     } else {
+      logToFile(wmLogFilePath, "LAUNCHING LAUNCHER", LogLevel.INFO);
       openLauncher();
     }
   });
@@ -696,11 +700,12 @@ app.on("window-all-closed", () => {
 
 ipcMain.on("onLaunchApp", (event, appCommand) => {
   const [command, ...args] = appCommand.split(" ");
-  if (launcherWid) launcherWid = null;
+  // if (launcherWid) launcherWid = null;
   const child = spawn(command, args, {
     env: { ...process.env },
     shell: true,
   });
+  launcherWindow.hide();
   //launcherWindow.close();
   //launcherWindow = null;
 
@@ -763,6 +768,11 @@ ipcMain.handle("getApps", async () => {
 });
 
 const openLauncher = () => {
+  if (launcherInited) {
+    launcherWindow.show();
+    return;
+  }
+  launcherInited = true;
   const [width, height] = [screen.pixel_width, screen.pixel_height];
 
   // Calculate the x and y coordinates to center the window
@@ -792,13 +802,14 @@ const openLauncher = () => {
   launcherWindow.setFocusable(true);
   launcherWindow.setAlwaysOnTop(true);
   launcherWid = getElectronWindowId(launcherWindow);
+
   /* 
     Reparent Electron container into x11 window container
     TODO: Wrap this into new function
   */
   // Desktop should be root in almost every situation
-  X.ReparentWindow(launcherWid, desktopWid, x, y);
-  X.MapWindow(launcherWid);
+  //X.ReparentWindow(launcherWid, desktopWid, x, y);
+  //X.MapWindow(launcherWid);
   logToFile(wmLogFilePath, launcherWid.toString(), LogLevel.DEBUG);
 };
 
