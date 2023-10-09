@@ -121,19 +121,44 @@ const openApp = async (
   );
   logToFile(wmLogFilePath, "launcher id:" + launcherWid, LogLevel.ERROR);
 
+  if (launcherWid === appWid) {
+    X.MapWindow(appWid);
+    return;
+  }
+
   if (!openedWindows.has(appWid)) openedWindows.add(appWid);
 
-  const filteredWindows = Array.from(openedWindows).filter(
-    (w) => w !== launcherWid
-  );
-
-  if (launcherWid === appWid) X.MapWindow(appWid);
-  if (filteredWindows.length === 1) {
+  if (openedWindows.size === 1) {
     X.ResizeWindow(appWid, screen.pixel_width, screen.pixel_height);
     X.ReparentWindow(appWid, desktopWid, 0, 0);
     X.MapWindow(appWid);
+    return;
   } else {
+    // if (splitDirection === SplitDirection.Horizontal) {
+    //   X.GetWindowAttributes(currentWindowId, (err, attributes) => {
+    //     if (err) {
+    //       logToFile(
+    //         wmLogFilePath,
+    //         "Could not get window attributes",
+    //         LogLevel.ERROR
+    //       );
+    //     }
+    //     logToFile(wmLogFilePath, JSON.stringify(attributes), LogLevel.DEBUG);
+    //   });
+    //   X.GetWindowAttributes(appWid, (err, attributes) => {
+    //     if (err) {
+    //       logToFile(
+    //         wmLogFilePath,
+    //         "Could not get window attributes",
+    //         LogLevel.ERROR
+    //       );
+    //     }
+    //     logToFile(wmLogFilePath, JSON.stringify(attributes), LogLevel.DEBUG);
+    //   });
+    // } else if (splitDirection === SplitDirection.Vertical) {
+    // }
     X.MapWindow(appWid);
+    return;
   }
 };
 
