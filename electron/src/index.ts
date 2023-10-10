@@ -4,7 +4,7 @@ import { XDisplay, XClient, createClient, eventMask, createWindow } from "x11";
 import ini from "ini";
 import fs from "fs";
 import path, { join } from "path";
-import { FyrConfig, SplitDirection, WindowGeometry } from "./types/FyrTypes";
+import { FyrConfig, FyrWindow, SplitDirection } from "./types/FyrTypes";
 import { logToFile, LogLevel, homedir, exec } from "./lib/utils";
 import { promisify } from "util";
 import { defaultFyrConfig } from "./lib/config";
@@ -33,12 +33,14 @@ let root: number;
 let desktopWindow: BrowserWindow = null;
 let desktopWid: number;
 let currentWindowId: number | null = null;
+let currentResizableWindow: FyrWindow = null;
 let screen: IXScreen = null;
 let GetPropertyAsync: (...args) => Promise<any>;
 let splitDirection = SplitDirection.Horizontal;
 let launcherWid: number = null;
 let launcherWindow: BrowserWindow = null;
 let launcherInited: boolean = false;
+let allOpenedFyrWindows: Set<FyrWindow> = new Set();
 
 // Track all open x11 windows
 const openedWindows: Set<number> = new Set();
@@ -109,6 +111,22 @@ const initDesktop = (display: XDisplay) => {
   return root;
 };
 
+const setCurrentResizableWindow = (
+  windowId: number,
+  width: number,
+  height: number,
+  x: number,
+  y: number
+) => {
+  currentResizableWindow = {
+    windowId,
+    width,
+    height,
+    x,
+    y,
+  };
+};
+
 const openApp = async (
   appWid: number,
   splitDirection: number,
@@ -132,34 +150,253 @@ const openApp = async (
     X.ResizeWindow(appWid, screen.pixel_width, screen.pixel_height);
     X.ReparentWindow(appWid, desktopWid, 0, 0);
     X.MapWindow(appWid);
+    X.SetInputFocus(appWid, XFocusRevertTo.PointerRoot);
+    setCurrentResizableWindow(
+      appWid,
+      screen.pixel_width,
+      screen.pixel_height,
+      0,
+      0
+    );
+
+    // First window has no pair, will be updated on next app open
+    allOpenedFyrWindows.add({
+      windowId: appWid,
+      width: screen.pixel_width,
+      height: screen.pixel_height,
+      x: 0,
+      y: 0,
+      horizontalParentId: null,
+      verticalParentId: null,
+      lastSplitType: null,
+    });
+
     return;
   } else {
-    // if (splitDirection === SplitDirection.Horizontal) {
-    //   X.GetWindowAttributes(currentWindowId, (err, attributes) => {
-    //     if (err) {
-    //       logToFile(
-    //         wmLogFilePath,
-    //         "Could not get window attributes",
-    //         LogLevel.ERROR
-    //       );
-    //     }
-    //     logToFile(wmLogFilePath, JSON.stringify(attributes), LogLevel.DEBUG);
-    //   });
-    //   X.GetWindowAttributes(appWid, (err, attributes) => {
-    //     if (err) {
-    //       logToFile(
-    //         wmLogFilePath,
-    //         "Could not get window attributes",
-    //         LogLevel.ERROR
-    //       );
-    //     }
-    //     logToFile(wmLogFilePath, JSON.stringify(attributes), LogLevel.DEBUG);
-    //   });
-    // } else if (splitDirection === SplitDirection.Vertical) {
-    // }
+    if (
+      splitDirection === SplitDirection.Horizontal &&
+      currentResizableWindow
+    ) {
+      // If horizonal selected, cut current window in half
+      const newWidth = currentResizableWindow.width / 2;
+      const newX = currentResizableWindow.width;
+      X.ResizeWindow(
+        currentResizableWindow.windowId,
+        newWidth,
+        currentResizableWindow.height
+      );
+      X.MapWindow(currentResizableWindow.windowId);
+
+      // Resize incoming window and map window
+      X.ResizeWindow(
+        appWid,
+        newWidth,
+        currentResizableWindow.height,
+        newX,
+        currentResizableWindow.y
+      );
+      X.ReparentWindow(appWid, desktopWid, newX, currentResizableWindow.y);
+      X.MapWindow(appWid);
+      setCurrentResizableWindow(
+        appWid,
+        newWidth,
+        currentResizableWindow.height,
+        newX,
+        currentResizableWindow.y
+      );
+
+      // Track new window with "parent" window id
+      allOpenedFyrWindows.add({
+        windowId: appWid,
+        width: newWidth,
+        height: currentResizableWindow.height,
+        x: newX,
+        y: currentResizableWindow.y,
+        horizontalParentId: currentResizableWindow.windowId,
+        verticalParentId: null,
+      });
+
+      // Modify existing window
+      allOpenedFyrWindows.delete(currentResizableWindow);
+      allOpenedFyrWindows.add({
+        ...currentResizableWindow,
+        width: newWidth,
+        // Last split type tracked in parent for resizing children on destroy
+        lastSplitType: SplitDirection.Horizontal,
+      });
+
+      return;
+    } else if (splitDirection === SplitDirection.Vertical) {
+      // Cut in half
+      const newHeight = currentResizableWindow.height / 2;
+      const newY = currentResizableWindow.y + newHeight;
+      X.ResizeWindow(
+        currentResizableWindow.windowId,
+        currentResizableWindow.width,
+        newHeight
+      );
+      X.MapWindow(currentResizableWindow.windowId);
+
+      // Resize incoming window and map window
+      X.ResizeWindow(
+        appWid,
+        currentResizableWindow.width,
+        newHeight,
+        currentResizableWindow.x,
+        newY
+      );
+      X.ReparentWindow(appWid, desktopWid, currentResizableWindow.x, newY);
+      X.MapWindow(appWid);
+
+      // Update current selected window for next resize
+      setCurrentResizableWindow(
+        appWid,
+        currentResizableWindow.width,
+        newHeight,
+        currentResizableWindow.x,
+        newY
+      );
+
+      // Track new window
+      allOpenedFyrWindows.add({
+        windowId: appWid,
+        width: currentResizableWindow.width,
+        height: newHeight,
+        x: currentResizableWindow.x,
+        y: newY,
+        verticalParentId: currentResizableWindow.windowId,
+        horizontalParentId: null,
+      });
+
+      // Modify existing window
+      allOpenedFyrWindows.delete(currentResizableWindow);
+      allOpenedFyrWindows.add({
+        ...currentResizableWindow,
+        height: newHeight,
+        lastSplitType: SplitDirection.Vertical,
+      });
+
+      return;
+    }
     X.MapWindow(appWid);
     return;
   }
+};
+
+// TODO: Break this logic up
+// Need to resize the window pair and move x/y if needed
+// First resize pair, then get width and scale the remaining containers accordingly
+const handleDestroyNotify = (wid: number) => {
+  // Get window to delete so we can first check for children
+  let windowToDelete: FyrWindow;
+  allOpenedFyrWindows.forEach((window) => {
+    if (window.windowId === wid) {
+      windowToDelete = window;
+    }
+  });
+
+  // Resize immediate child window
+  let hasChildren: boolean = false;
+  allOpenedFyrWindows.forEach((fyrWin) => {
+    if (fyrWin.horizontalParentId === wid || fyrWin.verticalParentId) {
+      hasChildren = true;
+      let childWindow = fyrWin;
+
+      //Resize and assign new parents
+      if (
+        fyrWin.horizontalParentId === wid &&
+        windowToDelete.lastSplitType === SplitDirection.Horizontal
+      ) {
+        allOpenedFyrWindows.delete(childWindow);
+        allOpenedFyrWindows.add({
+          ...childWindow,
+          width: windowToDelete.width + childWindow.width,
+          x: windowToDelete.x,
+          y: windowToDelete.y,
+          horizontalParentId: windowToDelete.horizontalParentId
+            ? windowToDelete.horizontalParentId
+            : null,
+          verticalParentId: windowToDelete.horizontalParentId
+            ? windowToDelete.horizontalParentId
+            : null,
+        });
+        X.ResizeWindow(
+          childWindow.windowId,
+          windowToDelete.width + childWindow.width,
+          childWindow.height,
+          windowToDelete.x,
+          windowToDelete.y
+        );
+        X.MapWindow(childWindow.windowId);
+      } else if (
+        fyrWin.verticalParentId === wid &&
+        windowToDelete.lastSplitType === SplitDirection.Vertical
+      ) {
+        allOpenedFyrWindows.delete(fyrWin);
+        allOpenedFyrWindows.add({
+          ...fyrWin,
+          height: windowToDelete.height + fyrWin.height,
+          x: windowToDelete.x,
+          y: windowToDelete.y,
+          horizontalParentId: windowToDelete.horizontalParentId
+            ? windowToDelete.horizontalParentId
+            : null,
+          verticalParentId: windowToDelete.horizontalParentId
+            ? windowToDelete.horizontalParentId
+            : null,
+        });
+        X.ResizeWindow(
+          childWindow.windowId,
+          childWindow.width,
+          windowToDelete.width + childWindow.height,
+          windowToDelete.x,
+          windowToDelete.y
+        );
+        X.MapWindow(childWindow.windowId);
+      }
+    }
+  });
+
+  // Resize parent if no children
+  if (windowToDelete.horizontalParentId || windowToDelete.verticalParentId) {
+    allOpenedFyrWindows.forEach((fyrWin) => {
+      if (windowToDelete.horizontalParentId === fyrWin.windowId) {
+        let parentWin = { ...fyrWin };
+        if (fyrWin.lastSplitType === SplitDirection.Horizontal) {
+          allOpenedFyrWindows.delete(fyrWin);
+          allOpenedFyrWindows.add({
+            ...fyrWin,
+            width: !hasChildren ? fyrWin.width : fyrWin.width * 2,
+          });
+          X.ResizeWindow(
+            parentWin.windowId,
+            windowToDelete.width + parentWin.width,
+            parentWin.height,
+            parentWin.x,
+            parentWin.y
+          );
+          X.MapWindow(parentWin.windowId);
+        } else if (fyrWin.lastSplitType === SplitDirection.Vertical) {
+          allOpenedFyrWindows.delete(fyrWin);
+          allOpenedFyrWindows.add({
+            ...fyrWin,
+            height: !hasChildren ? fyrWin.height : fyrWin.height * 2,
+          });
+          X.ResizeWindow(
+            parentWin.windowId,
+            parentWin.width,
+            parentWin.height + windowToDelete.height,
+            parentWin.x,
+            parentWin.y
+          );
+          X.MapWindow(parentWin.windowId);
+        }
+      }
+    });
+  }
+
+  // TODO: Scale remaining windows if necessary:
+  // const [screenWidth, screenHeight] = [screen.pixel_width, screen.pixel_height];
 };
 
 const initX11Client = async () => {
@@ -205,6 +442,7 @@ const initX11Client = async () => {
         case X11_EVENT_TYPE.ButtonPress:
           // Set focus to the clicked window
           X.SetInputFocus(PointerRoot, XFocusRevertTo.PointerRoot);
+          X.ConfigureWindow(ev.wid, { stackMode: 0 });
           X.SendEvent(ev.wid, true, x11.eventMask.ButtonPress, ev.rawData);
           break;
         case X11_EVENT_TYPE.ButtonRelease:
@@ -239,13 +477,18 @@ const initX11Client = async () => {
           currentWindowId = ev.wid;
           break;
         case X11_EVENT_TYPE.DestroyNotify:
+          //TODO: Resize here as well (Maybe look for items with no height/width/x/y matches?)
           logToFile(wmLogFilePath, JSON.stringify(ev.name), LogLevel.ERROR);
           if (openedWindows.has(ev.wid)) {
             openedWindows.delete(ev.wid);
           }
+
+          handleDestroyNotify(ev.wid);
+
           if (currentWindowId === ev.wid) {
             if (openedWindows.size === 0) {
               currentWindowId = null;
+              currentResizableWindow = null;
             } else {
               // Last opened or focused window
               currentWindowId = Array.from(openedWindows).pop() || null;
@@ -310,11 +553,24 @@ app.whenReady().then(() => {
     );
   }
 
-  // Exit wm
-  const closeAppShortcut = globalShortcut.register("Ctrl+Shift+Q", () => {
-    app.quit();
+  const closeAppShortcut = globalShortcut.register("Super+Q", () => {
+    if (currentResizableWindow) {
+      X.DestroyWindow(currentResizableWindow.windowId);
+    }
   });
   if (!closeAppShortcut) {
+    logToFile(
+      wmLogFilePath,
+      "You can check out any time you like, but you can never leave..",
+      LogLevel.ERROR
+    );
+  }
+
+  // Exit wm
+  const closeWMShortcut = globalShortcut.register("Ctrl+Shift+Q", () => {
+    app.quit();
+  });
+  if (!closeWMShortcut) {
     logToFile(
       wmLogFilePath,
       "You can check out any time you like, but you can never leave..",

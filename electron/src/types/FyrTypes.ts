@@ -42,10 +42,14 @@ export enum SplitDirection {
   Vertical = 1,
 }
 
-export interface WindowGeometry {
+export interface FyrWindow {
   width: number;
   height: number;
-  x?: number;
-  y?: number;
-  windowId?: number;
+  x: number;
+  y: number;
+  windowId: number;
+  // Was the currentWindow when this on was launched
+  horizontalParentId?: number;
+  verticalParentId?: number;
+  lastSplitType?: SplitDirection;
 }
