@@ -27,7 +27,7 @@ const x11: IX11Mod = require("x11");
 
 // Globals
 const wmLogFilePath = join(homedir(), ".fyr", "logs", "wm.log");
-let X: IXClient;
+let X: any// IXClient;
 let client: IX11Client;
 let root: number;
 let desktopWindow: BrowserWindow = null;
@@ -133,6 +133,15 @@ const setCurrentResizableWindow = (
   };
 };
 
+const deleteFyrWin = (wid: number) => {
+  allOpenedFyrWindows.forEach(win => {
+    if (win.windowId === wid) {
+      allOpenedFyrWindows.delete(win);
+      return;
+    }
+  });
+}
+
 const openApp = async (
   appWid: number,
   splitDirection: number,
@@ -156,7 +165,19 @@ const openApp = async (
     X.ResizeWindow(appWid, screen.pixel_width, screen.pixel_height);
     X.ReparentWindow(appWid, root, 0, 0);
     X.MapWindow(appWid);
-    X.SetInputFocus(appWid, XFocusRevertTo.PointerRoot);
+    X.ChangeWindowAttributes(appWid, {
+      eventMask: 
+      x11.eventMask.StructureNotify |
+      x11.eventMask.EnterWindow |
+      x11.eventMask.LeaveWindow |
+      x11.eventMask.KeyPress |
+      x11.eventMask.KeyRelease |
+      x11.eventMask.FocusChange |
+      x11.eventMask.ButtonRelease
+    }, (err) => {
+      logToFile(wmLogFilePath, JSON.stringify(err), LogLevel.ERROR)
+    })
+    // X.SetInputFocus(appWid, XFocusRevertTo.PointerRoot);
     setCurrentResizableWindow(
       appWid,
       screen.pixel_width,
@@ -213,13 +234,26 @@ const openApp = async (
       });
 
       // Modify existing window
-      allOpenedFyrWindows.delete(currentResizableWindow);
+      deleteFyrWin(currentResizableWindow.windowId);
       allOpenedFyrWindows.add({
         ...currentResizableWindow,
         width: newWidth,
         // Last split type tracked in parent for resizing children on destroy
         lastSplitType: SplitDirection.Horizontal,
       });
+
+      X.ChangeWindowAttributes(appWid, {
+        eventMask: 
+        x11.eventMask.StructureNotify |
+        x11.eventMask.EnterWindow |
+        x11.eventMask.LeaveWindow |
+        x11.eventMask.KeyPress |
+        x11.eventMask.KeyRelease |
+        x11.eventMask.FocusChange |
+        x11.eventMask.ButtonRelease
+      }, (err) => {
+        logToFile(wmLogFilePath, JSON.stringify(err), LogLevel.ERROR)
+      })
 
       setCurrentResizableWindow(
         appWid,
@@ -261,12 +295,25 @@ const openApp = async (
       });
 
       // Modify existing window
-      allOpenedFyrWindows.delete(currentResizableWindow);
+      deleteFyrWin(currentResizableWindow.windowId);
       allOpenedFyrWindows.add({
         ...currentResizableWindow,
         height: newHeight,
         lastSplitType: SplitDirection.Vertical,
       });
+
+      X.ChangeWindowAttributes(appWid, {
+        eventMask: 
+        x11.eventMask.StructureNotify |
+        x11.eventMask.EnterWindow |
+        x11.eventMask.LeaveWindow |
+        x11.eventMask.KeyPress |
+        x11.eventMask.KeyRelease |
+        x11.eventMask.FocusChange |
+        x11.eventMask.ButtonRelease
+      }, (err) => {
+        logToFile(wmLogFilePath, JSON.stringify(err), LogLevel.ERROR)
+      })
 
       // Update current selected window for next resize
       setCurrentResizableWindow(
@@ -430,7 +477,7 @@ const findCurrentWindow = (wid: number): FyrWindow => {
   allOpenedFyrWindows.forEach((win) => {
     if (win.windowId === wid) return win;
   });
-  return null;
+  return currentResizableWindow;
 };
 
 const initX11Client = async () => {
@@ -463,46 +510,62 @@ const initX11Client = async () => {
       }
     );
 
+    X.on("event",(ev) => {
+      logToFile(wmLogFilePath, JSON.stringify(ev), LogLevel.DEBUG)
+    }) 
+
     // Capture keyboard, mouse, and window events
     client.on("event", async (ev: IXEvent) => {
+      logToFile(wmLogFilePath, JSON.stringify(ev), LogLevel.DEBUG)
       const { type } = ev;
       switch (type) {
         case X11_EVENT_TYPE.KeyPress:
-          X.SendEvent(ev.wid, true, x11.eventMask.KeyPress, ev.rawData);
+          logToFile(wmLogFilePath, "KEY PRESSED", LogLevel.DEBUG);
+          // X.SendEvent(ev.wid, false, x11.eventMask.KeyPress, ev.rawData);
           break;
         case X11_EVENT_TYPE.KeyRelease:
-          X.SendEvent(ev.wid, true, x11.eventMask.KeyRelease, ev.rawData);
+          logToFile(wmLogFilePath, "KEY RELEASED", LogLevel.DEBUG);
+          // X.SendEvent(ev.wid, false, x11.eventMask.KeyRelease, ev.rawData);
           break;
         case X11_EVENT_TYPE.ButtonPress:
           // Set focus to the clicked window
-          X.SetInputFocus(PointerRoot, XFocusRevertTo.PointerRoot);
+          // X.SetInputFocus(ev.wid, XFocusRevertTo.PointerRoot);
           X.ConfigureWindow(ev.wid, { stackMode: 0 });
           currentResizableWindow = findCurrentWindow(ev.wid);
-          X.SendEvent(ev.wid, true, x11.eventMask.ButtonPress, ev.rawData);
+          // X.SendEvent(ev.wid, false, x11.eventMask.ButtonPress, ev.rawData);
+          logToFile(wmLogFilePath, "BUTTON PRESSED", LogLevel.DEBUG);
+          logToFile(wmLogFilePath, JSON.stringify(ev), LogLevel.DEBUG);
           break;
         case X11_EVENT_TYPE.ButtonRelease:
-          X.SendEvent(ev.wid, true, x11.eventMask.ButtonRelease, ev.rawData);
+          logToFile(wmLogFilePath, "BUTTON RELEASED", LogLevel.DEBUG)
+          // X.SendEvent(PointerRoot, true, x11.eventMask.ButtonRelease, ev.rawData);
           break;
         case X11_EVENT_TYPE.MotionNotify:
           break;
         case X11_EVENT_TYPE.EnterNotify:
+          logToFile(wmLogFilePath, JSON.stringify(findCurrentWindow(ev.wid)), LogLevel.DEBUG);
+          const focusedWindow = findCurrentWindow(ev.wid)
+          currentWindowId = ev.wid !== launcherWid ? ev.wid : currentWindowId;
+          currentResizableWindow = ev.wid !== launcherWid && focusedWindow ? focusedWindow : currentResizableWindow;
           break;
         case X11_EVENT_TYPE.LeaveNotify:
           break;
-        case X11_EVENT_TYPE.FocusIn:
-          // Update currentWindowId when a window gains focus
-          currentWindowId = ev.wid;
-          currentResizableWindow = findCurrentWindow(ev.wid);
-          logToFile(wmLogFilePath, ev.name, LogLevel.ERROR);
-          break;
-        case X11_EVENT_TYPE.FocusOut:
-          // Try to set currentWindowId to a reasonable fallback
-          if (openedWindows.size === 0) {
-            currentWindowId = null;
-          } else {
-            currentWindowId = Array.from(openedWindows).pop() || null;
-          }
-          break;
+        // case X11_EVENT_TYPE.FocusIn:
+        //   // Update currentWindowId when a window gains focus
+        //   logToFile(wmLogFilePath, "FOCUS IN", LogLevel.DEBUG);
+        //   currentWindowId = ev.wid;
+        //   currentResizableWindow = findCurrentWindow(ev.wid);
+        //   logToFile(wmLogFilePath, ev.name, LogLevel.ERROR);
+        //   break;
+        // case X11_EVENT_TYPE.FocusOut:
+        //   // Try to set currentWindowId to a reasonable fallback
+        //   logToFile(wmLogFilePath, "FOCUS OUT", LogLevel.DEBUG);
+        //   if (openedWindows.size === 0) {
+        //     currenrtWindowId = null;
+        //   } else {
+        //     currentWindowId = Array.from(openedWindows).pop() || null;
+        //   }
+        //   break;
         case X11_EVENT_TYPE.Expose:
           break;
         case X11_EVENT_TYPE.CreateNotify:
@@ -766,7 +829,7 @@ const openLauncher = () => {
   launcherWid = getElectronWindowId(launcherWindow);
   X.ReparentWindow(launcherWid, root, x, y);
   X.MapWindow(launcherWid);
-  X.SetInputFocus(launcherWid, XFocusRevertTo.PointerRoot);
+  // X.SetInputFocus(launcherWid, XFocusRevertTo.PointerRoot);
 };
 
 const checkIfGuiApp = async (windowId: number): Promise<boolean> => {
