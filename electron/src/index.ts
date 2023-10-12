@@ -121,6 +121,7 @@ const setCurrentResizableWindow = (
   verticalParentId: number,
   lastSplitType: SplitDirection
 ) => {
+  if (windowId === launcherWid) return;
   currentResizableWindow = {
     windowId,
     width,
@@ -141,6 +142,16 @@ const deleteFyrWin = (wid: number) => {
     }
   });
 }
+
+const addFyrWind = (fyrWin: FyrWindow) => {
+  if (fyrWin.windowId === launcherWid) return;
+  allOpenedFyrWindows.forEach((win) => {
+    if (win.windowId === fyrWin.windowId) {
+      allOpenedFyrWindows.delete(win)
+    };
+  });
+  allOpenedFyrWindows.add(fyrWin);
+} 
 
 const openApp = async (
   appWid: number,
@@ -190,7 +201,7 @@ const openApp = async (
     );
 
     // First window has no pair, will be updated on next app open
-    allOpenedFyrWindows.add({
+    addFyrWind({
       windowId: appWid,
       width: screen.pixel_width,
       height: screen.pixel_height,
@@ -223,7 +234,7 @@ const openApp = async (
       X.MapWindow(appWid);
 
       // Track new window with "parent" window id
-      allOpenedFyrWindows.add({
+      addFyrWind({
         windowId: appWid,
         width: newWidth,
         height: currentResizableWindow.height,
@@ -235,7 +246,7 @@ const openApp = async (
 
       // Modify existing window
       deleteFyrWin(currentResizableWindow.windowId);
-      allOpenedFyrWindows.add({
+      addFyrWind({
         ...currentResizableWindow,
         width: newWidth,
         // Last split type tracked in parent for resizing children on destroy
@@ -284,7 +295,7 @@ const openApp = async (
       X.MapWindow(appWid);
 
       // Track new window
-      allOpenedFyrWindows.add({
+      addFyrWind({
         windowId: appWid,
         width: currentResizableWindow.width,
         height: newHeight,
@@ -296,7 +307,7 @@ const openApp = async (
 
       // Modify existing window
       deleteFyrWin(currentResizableWindow.windowId);
-      allOpenedFyrWindows.add({
+      addFyrWind({
         ...currentResizableWindow,
         height: newHeight,
         lastSplitType: SplitDirection.Vertical,
@@ -362,7 +373,7 @@ const handleDestroyNotify = (wid: number) => {
         windowToDelete.lastSplitType === SplitDirection.Horizontal
       ) {
         allOpenedFyrWindows.delete(childWindow);
-        allOpenedFyrWindows.add({
+        addFyrWind({
           ...childWindow,
           width: windowToDelete.width + childWindow.width,
           x: windowToDelete.x,
@@ -388,7 +399,7 @@ const handleDestroyNotify = (wid: number) => {
       ) {
         logToFile(wmLogFilePath, "RESIZING CHILD VERTICAL", LogLevel.ERROR);
         allOpenedFyrWindows.delete(fyrWin);
-        allOpenedFyrWindows.add({
+        addFyrWind({
           ...childWindow,
           height: windowToDelete.height + childWindow.height,
           x: windowToDelete.x,
@@ -437,7 +448,7 @@ const handleDestroyNotify = (wid: number) => {
         let parentWin = { ...fyrWin };
         if (fyrWin.lastSplitType === SplitDirection.Horizontal) {
           allOpenedFyrWindows.delete(fyrWin);
-          allOpenedFyrWindows.add({
+          addFyrWind({
             ...fyrWin,
             width: !hasChildren ? fyrWin.width : fyrWin.width * 2,
           });
@@ -451,7 +462,7 @@ const handleDestroyNotify = (wid: number) => {
           X.MapWindow(parentWin.windowId);
         } else if (fyrWin.lastSplitType === SplitDirection.Vertical) {
           allOpenedFyrWindows.delete(fyrWin);
-          allOpenedFyrWindows.add({
+          addFyrWind({
             ...fyrWin,
             height: !hasChildren ? fyrWin.height : fyrWin.height * 2,
           });
@@ -474,10 +485,14 @@ const handleDestroyNotify = (wid: number) => {
 };
 
 const findCurrentWindow = (wid: number): FyrWindow => {
+  let foundWindow: FyrWindow = null;
   allOpenedFyrWindows.forEach((win) => {
-    if (win.windowId === wid) return win;
+    if (win.windowId === wid)  { 
+      logToFile(wmLogFilePath, "OPENED: " + JSON.stringify(win), LogLevel.ERROR)
+     foundWindow = win;
+    }
   });
-  return currentResizableWindow;
+  return foundWindow;
 };
 
 const initX11Client = async () => {
@@ -531,7 +546,7 @@ const initX11Client = async () => {
           // Set focus to the clicked window
           // X.SetInputFocus(ev.wid, XFocusRevertTo.PointerRoot);
           X.ConfigureWindow(ev.wid, { stackMode: 0 });
-          currentResizableWindow = findCurrentWindow(ev.wid);
+          // currentResizableWindow = findCurrentWindow(ev.wid);
           // X.SendEvent(ev.wid, false, x11.eventMask.ButtonPress, ev.rawData);
           logToFile(wmLogFilePath, "BUTTON PRESSED", LogLevel.DEBUG);
           logToFile(wmLogFilePath, JSON.stringify(ev), LogLevel.DEBUG);
@@ -543,8 +558,8 @@ const initX11Client = async () => {
         case X11_EVENT_TYPE.MotionNotify:
           break;
         case X11_EVENT_TYPE.EnterNotify:
-          logToFile(wmLogFilePath, JSON.stringify(findCurrentWindow(ev.wid)), LogLevel.DEBUG);
-          const focusedWindow = findCurrentWindow(ev.wid)
+          logToFile(wmLogFilePath, "CURRENT WINDOW:" +JSON.stringify(findCurrentWindow(ev.wid)), LogLevel.DEBUG);
+          const focusedWindow = findCurrentWindow(ev.wid);
           currentWindowId = ev.wid !== launcherWid ? ev.wid : currentWindowId;
           currentResizableWindow = ev.wid !== launcherWid && focusedWindow ? focusedWindow : currentResizableWindow;
           break;
