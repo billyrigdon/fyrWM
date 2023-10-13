@@ -9,9 +9,11 @@ The instructions are meant to be run a fresh arch install and are mainly just to
 
 ```
 # Keyboard shorcuts
+# Super + V: vertical split mode
+# Super + H: horizontal split mode
 # Super + Q: close window
-# Super + Space: Open autocomplete
-# Ctrl + Shift + Q: Close window manager
+# Super + Space: open autocomplete
+# Ctrl + Shift + Q: close window manager
 ```
 
 
