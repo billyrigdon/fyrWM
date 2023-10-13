@@ -6,6 +6,15 @@ fyrWM \(frick your ram\) is an x11 tiling window manager written in typescript u
 
 The instructions are meant to be run a fresh arch install and are mainly just to install the tools I'm using to build and include in the eventual distribution. Warning: a lot of 3rd party tools.
 
+
+```
+# Keyboard shorcuts
+# Super + Q: close window
+# Super + Space: Open autocomplete
+# Ctrl + Shift + Q: Close window manager
+```
+
+
 ```
 #Clone repo
 git clone https://github.com/billyrigdon/nodeWM.git;
