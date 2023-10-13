@@ -44,7 +44,7 @@ export const logToFile = async (
     // File does not exist, create parent directories if they don't exist
     const dirName = path.dirname(filePath);
     await mkdir(dirName, { recursive: true });
-    // Create file with the logMessage
+    // Create file
     await writeFile(filePath, logMessage, "utf8");
     return;
   }
@@ -79,7 +79,5 @@ export const exec: (command: string, callback: (error: any) => void) => void = (
       callback(error);
       return;
     }
-
-    // You can also handle `stdout` and `stderr` if needed
   });
 };

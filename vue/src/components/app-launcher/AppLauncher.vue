@@ -10,7 +10,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, defineProps, onMounted } from "vue";
+import { ref, onMounted } from "vue";
 import { ipcRenderer } from "electron";
 
 // Data
@@ -23,7 +23,6 @@ onMounted(async () => {
   apps.value = await ipcRenderer.invoke("getApps");
 });
 
-// Methods
 const onInput = () => {
   if (!searchText.value) {
     filteredApps.value = [];
@@ -38,8 +37,7 @@ const selectApp = (app: { name: string; exec: string }) => {
   searchText.value = app.name;
   filteredApps.value = [];
 
-  // Send message to Electron's main process
-  ipcRenderer.send("onLaunchApp", app.exec); // Sending the command instead of the name
+  ipcRenderer.send("onLaunchApp", app.exec);
 };
 </script>
 

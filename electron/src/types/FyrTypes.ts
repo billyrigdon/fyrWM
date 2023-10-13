@@ -32,9 +32,9 @@ export interface FyrConfig {
 }
 
 enum LogLevel {
-  INFO = 'INFO',
-  ERROR = 'ERROR',
-  DEBUG = 'DEBUG'
+  INFO = "INFO",
+  ERROR = "ERROR",
+  DEBUG = "DEBUG",
 }
 
 export enum SplitDirection {
@@ -48,10 +48,9 @@ export interface FyrWindow {
   x: number;
   y: number;
   windowId: number;
-  // Was the currentWindow when this on was launched
-  horizontalParentId?: number;
-  verticalParentId?: number;
+  horizontalParentId: number;
+  verticalParentId: number;
   horizontalChildId: number;
   verticalChildId: number;
-  lastSplitType?: SplitDirection;
+  lastSplitType: SplitDirection;
 }

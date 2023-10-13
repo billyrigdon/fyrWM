@@ -327,13 +327,28 @@ interface RandrExtension {
     ClockDivideBy2: 8192;
   };
 
-  QueryVersion(clientMaj: number, clientMin: number, callback: XCbWithErr<[unknown]>): void;
+  QueryVersion(
+    clientMaj: number,
+    clientMin: number,
+    callback: XCbWithErr<[unknown]>
+  ): void;
   //SetScreenConfig(win, ts, configTs, sizeId, rotation, rate, cb): void;
   //SelectInput(win, mask): void;
   GetScreenInfo(win: number, cb: XCbWithErr<[info: XRandrScreenInfo]>): void;
-  GetScreenResources(win: number, cb: XCbWithErr<[res: XRandrScreenResources]>): void;
-  GetOutputInfo(output: number, ts: number, cb: XCbWithErr<[info: XRandrOutputInfo]>): void;
-  GetCrtcInfo(crtc: number, configTs: number, cb: XCbWithErr<[info: XRandrCtrcInfo]>): void;
+  GetScreenResources(
+    win: number,
+    cb: XCbWithErr<[res: XRandrScreenResources]>
+  ): void;
+  GetOutputInfo(
+    output: number,
+    ts: number,
+    cb: XCbWithErr<[info: XRandrOutputInfo]>
+  ): void;
+  GetCrtcInfo(
+    crtc: number,
+    configTs: number,
+    cb: XCbWithErr<[info: XRandrCtrcInfo]>
+  ): void;
 }
 
 export type XRandrExtension = XExtension<RandrExtension>;
@@ -349,7 +364,11 @@ interface XineramaExtension {
   major: number;
   minor: number;
 
-  QueryVersion(clientMaj: number, clientMin: number, callback: XCbWithErr<[[major: number, minor: number]]>): void;
+  QueryVersion(
+    clientMaj: number,
+    clientMin: number,
+    callback: XCbWithErr<[[major: number, minor: number]]>
+  ): void;
   IsActive(callback: XCbWithErr<[isActive: boolean]>): void;
   QueryScreens(callback: XCbWithErr<[info: XineramaScreenInfo[]]>): void;
 }
@@ -492,7 +511,10 @@ export interface XBuffer {
   unpack(format: string, offset?: number): number[];
 }
 
-export type XCbWithErr<TArgs extends unknown[], TError = unknown> = (err: TError, ...args: TArgs) => void;
+export type XCbWithErr<TArgs extends unknown[], TError = unknown> = (
+  err: TError,
+  ...args: TArgs
+) => void;
 
 export type Atom = number;
 
@@ -568,7 +590,7 @@ export interface XStandardAtoms {
 }
 
 // https://github.com/sidorares/node-x11/wiki/Core-requests
-export interface IXClient extends IX11Client{
+export interface IXClient extends IX11Client {
   atoms: XStandardAtoms;
 
   screenNum: number;
@@ -619,9 +641,17 @@ export interface IXClient extends IX11Client{
   CopyArea(...args: unknown[]): unknown;
   CreateColormap(...args: unknown[]): unknown;
   CreateCursor(...args: unknown[]): unknown;
-  CreateGC(gcId: unknown, drawableId: unknown, createGCAdditionalValues: unknown): void;
+  CreateGC(
+    gcId: unknown,
+    drawableId: unknown,
+    createGCAdditionalValues: unknown
+  ): void;
   CreatePixmap(...args: unknown[]): unknown;
-  DeleteProperty(winId: number, propNameAtom: Atom, callback?: XCbWithErr<[void]>): void;
+  DeleteProperty(
+    winId: number,
+    propNameAtom: Atom,
+    callback?: XCbWithErr<[void]>
+  ): void;
   DestroyWindow(winId: number): void;
   ForceScreenSaver(...args: unknown[]): unknown;
   FreePixmap(...args: unknown[]): unknown;
@@ -629,7 +659,11 @@ export interface IXClient extends IX11Client{
   GetGeometry(winId: number, callback: XCbWithErr<[drawable: XGeometry]>): void;
   GetImage(...args: unknown[]): unknown;
   GetInputFocus(): { focus: number; revertTo: XFocusRevertTo };
-  GetKeyboardMapping(firstKeycode: number, count: number, callback: XCbWithErr<[list: number[][]]>): void;
+  GetKeyboardMapping(
+    firstKeycode: number,
+    count: number,
+    callback: XCbWithErr<[list: number[][]]>
+  ): void;
   GetProperty(
     deleteAfterGet: unknown,
     wid: number,
@@ -640,7 +674,10 @@ export interface IXClient extends IX11Client{
     callback: XCbWithErr<[XGetPropertyCallbackProps]>
   ): void;
   GetSelectionOwner(...args: unknown[]): unknown;
-  GetWindowAttributes(wid: number, callback: XCbWithErr<[attrs: XWindowAttrs]>): void;
+  GetWindowAttributes(
+    wid: number,
+    callback: XCbWithErr<[attrs: XWindowAttrs]>
+  ): void;
   GrabButton(...args: unknown[]): unknown;
   GrabKey(
     wid: number,
@@ -669,7 +706,11 @@ export interface IXClient extends IX11Client{
     callback: XCbWithErr<[unknown]>
   ): void;
   GrabServer(...args: unknown[]): unknown;
-  InternAtom(returnOnlyIfExist: boolean, str: string, callback: XCbWithErr<[atomId: Atom]>): void;
+  InternAtom(
+    returnOnlyIfExist: boolean,
+    str: string,
+    callback: XCbWithErr<[atomId: Atom]>
+  ): void;
   KillClient(resource: number): void;
   KillKlient(...args: unknown[]): unknown;
   // typeNameAtom: 0 = AnyType
@@ -685,7 +726,13 @@ export interface IXClient extends IX11Client{
   PolyFillRectangle(...args: unknown[]): unknown;
   PolyPoint(...args: unknown[]): unknown;
   PolyLine(...args: unknown[]): unknown;
-  PolyText8(drawable: unknown, gc: unknown, x: number, y: number, items: unknown): void;
+  PolyText8(
+    drawable: unknown,
+    gc: unknown,
+    x: number,
+    y: number,
+    items: unknown
+  ): void;
   PutImage(
     format: unknown,
     drawable: unknown,
@@ -698,14 +745,33 @@ export interface IXClient extends IX11Client{
     depth: unknown,
     dataBuffer: Buffer
   ): void;
-  QueryExtension<T>(name: string, callback: XCbWithErr<[ext: XExtension<T>]>): void;
-  QueryPointer(winId: number, callback: XCbWithErr<[result: XQueryPointerResult]>): void;
-  QueryTree(winId: number, callback: XCbWithErr<[result: XQueryTreeResult]>): void;
+  QueryExtension<T>(
+    name: string,
+    callback: XCbWithErr<[ext: XExtension<T>]>
+  ): void;
+  QueryPointer(
+    winId: number,
+    callback: XCbWithErr<[result: XQueryPointerResult]>
+  ): void;
+  QueryTree(
+    winId: number,
+    callback: XCbWithErr<[result: XQueryTreeResult]>
+  ): void;
   RaiseWindow(winId: number): void;
   ReleaseID(id: number): void;
-  ReparentWindow(winId: number, newParentId: number, x: number, y: number): void;
+  ReparentWindow(
+    winId: number,
+    newParentId: number,
+    x: number,
+    y: number
+  ): void;
   ResizeWindow(...args: unknown[]): unknown;
-  SendEvent(destination: number, propagate: boolean, eventMask: number, eventRawData: unknown): void;
+  SendEvent(
+    destination: number,
+    propagate: boolean,
+    eventMask: number,
+    eventRawData: unknown
+  ): void;
   SetInputFocus(winId: number, revertTo: XFocusRevertTo): void;
   SetScreenSaver(...args: unknown[]): unknown;
   SetSelectionOwner(owner: number, selection: number, time?: number): unknown;
@@ -719,7 +785,6 @@ export interface IXClient extends IX11Client{
   WarpPointer(...args: unknown[]): unknown;
 }
 
-
 export interface IX11Client {
   on(eventName: "event", callback: (ev: IXEvent) => void): void;
   on(eventName: string, callback: (...args: unknown[]) => void): void;
@@ -731,7 +796,6 @@ export interface IX11Mod {
 
   createClient(callback: XCbWithErr<[display: IXDisplay]>): IX11Client;
 }
-
 
 export const ExtraAtoms = {
   UTF8_STRING: -1,
@@ -822,4 +886,3 @@ export interface IXWMEventConsumer {
 
   onSetFrameExtents?(args: XWMEventConsumerSetFrameExtentsArgs): void;
 }
-
