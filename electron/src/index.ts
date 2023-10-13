@@ -165,8 +165,9 @@ const openApp = (
   if (!openedWindows.has(appWid)) openedWindows.add(appWid);
 
   if (openedWindows.size === 1) {
-    X.ResizeWindow(appWid, screen.pixel_width, screen.pixel_height);
-    X.ReparentWindow(appWid, root, 0, 0);
+    // Gap
+    X.ResizeWindow(appWid, screen.pixel_width - 10, screen.pixel_height - 10);
+    X.ReparentWindow(appWid, root, 5, 5);
     X.MapWindow(appWid);
     X.ChangeWindowAttributes(
       appWid,
@@ -187,10 +188,10 @@ const openApp = (
     // X.SetInputFocus(appWid, XFocusRevertTo.PointerRoot);
     setCurrentResizableWindow(
       appWid,
-      screen.pixel_width,
-      screen.pixel_height,
-      0,
-      0,
+      screen.pixel_width - 10,
+      screen.pixel_height - 10,
+      5,
+      5,
       null,
       null,
       null,
@@ -201,10 +202,10 @@ const openApp = (
     // First window has no pair, will be updated on next app open
     addFyrWind({
       windowId: appWid,
-      width: screen.pixel_width,
-      height: screen.pixel_height,
-      x: 0,
-      y: 0,
+      width: screen.pixel_width - 10,
+      height: screen.pixel_height - 10,
+      x: 5,
+      y: 5,
       horizontalParentId: null,
       verticalParentId: null,
       horizontalChildId: null,
@@ -219,8 +220,8 @@ const openApp = (
       currentResizableWindow
     ) {
       // If horizonal selected, cut current window in half
-      const newWidth = currentResizableWindow.width / 2;
-      const newX = currentResizableWindow.x + newWidth;
+      const newWidth = (currentResizableWindow.width - 5) / 2;
+      const newX = currentResizableWindow.x + newWidth + 5;
       X.ResizeWindow(
         currentResizableWindow.windowId,
         newWidth,
@@ -303,8 +304,8 @@ const openApp = (
       return;
     } else if (splitDirection === SplitDirection.Vertical) {
       // Cut in half
-      const newHeight = currentResizableWindow.height / 2;
-      const newY = currentResizableWindow.y + newHeight;
+      const newHeight = (currentResizableWindow.height - 5) / 2;
+      const newY = currentResizableWindow.y + newHeight + 5;
       X.ResizeWindow(
         currentResizableWindow.windowId,
         currentResizableWindow.width,
@@ -489,7 +490,7 @@ const resizeAdjacentWindows = (
   allOpenedFyrWindows.forEach((fyrWin) => {
     if (direction === SplitDirection.Vertical) {
       // If child top is on bottom border
-      if (parentWindow.y + parentWindow.height === fyrWin.y) {
+      if (parentWindow.y + parentWindow.height + 5 === fyrWin.y) {
         // If bordering child is within the width of the current container
         if (
           fyrWin.x >= parentWindow.x &&
@@ -540,7 +541,7 @@ const resizeAdjacentWindows = (
         }
       }
     } else if (direction === SplitDirection.Horizontal) {
-      if (parentWindow.x + parentWindow.width === fyrWin.x) {
+      if (parentWindow.x + parentWindow.width + 5 === fyrWin.x) {
         if (
           fyrWin.y >= parentWindow.y &&
           fyrWin.height + fyrWin.y <= parentWindow.height + parentWindow.y
