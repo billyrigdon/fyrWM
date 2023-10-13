@@ -1,5 +1,5 @@
 # Bundled language toolsets and dependencies
-sudo pacman -S --noconfirm less zsh networkmanager base-devel git vivaldi htop ansible curl wget openjdk17-src dotnet-sdk xorg docker docker-compose chromium epiphany neovim tmux make gcc valgrind clang python python-pip ruby maven gradle go rust rustup php php-apache android-tools android-udev code intellij-idea-community-edition go gnome-boxes 
+sudo pacman -S --noconfirm less zsh networkmanager base-devel git vivaldi htop ansible curl wget openjdk17-src dotnet-sdk xorg docker docker-compose chromium epiphany neovim tmux make gcc valgrind clang python python-pip ruby maven gradle go rust rustup php php-apache android-tools android-udev code intellij-idea-community-edition go gnome-boxes feh i3 i3blocks dmenu redshift alacritty picom xorg-xinput xorg-xbacklight
 
 #Install yay
 pacman -S --noconfirm --needed git base-devel && git clone https://aur.archlinux.org/yay-bin.git && cd yay-bin && makepkg -si

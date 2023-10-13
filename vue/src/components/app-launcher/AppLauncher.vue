@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div id="autocomplete-container">
     <input type="text" v-model="searchText" @input="onInput" />
     <div v-if="filteredApps.length">
       <div v-for="app in filteredApps" :key="app.name" @click="selectApp(app)">
@@ -10,7 +10,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, defineProps, onMounted } from "vue";
+import { ref, onMounted } from "vue";
 import { ipcRenderer } from "electron";
 
 // Data
@@ -23,7 +23,6 @@ onMounted(async () => {
   apps.value = await ipcRenderer.invoke("getApps");
 });
 
-// Methods
 const onInput = () => {
   if (!searchText.value) {
     filteredApps.value = [];
@@ -38,11 +37,20 @@ const selectApp = (app: { name: string; exec: string }) => {
   searchText.value = app.name;
   filteredApps.value = [];
 
-  // Send message to Electron's main process
-  ipcRenderer.send("onLaunchApp", app.exec);  // Sending the command instead of the name
+  ipcRenderer.send("onLaunchApp", app.exec);
 };
 </script>
 
-<style scoped>
-/* Your styles here */
+<style lang="scss" scoped>
+#autocomplete-container {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  border-radius: 5px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  input {
+    width: 100%;
+    height: 100%;
+  }
+}
 </style>

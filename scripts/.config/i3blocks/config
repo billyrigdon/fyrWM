@@ -1,0 +1,41 @@
+# Global properties
+separator = ⮁
+separator_block_width = 15
+
+# i3 Workspaces
+[i3_workspaces]
+command=i3-msg -t get_workspaces | jq -r 'sort_by(.num) | .[] | "\(.name) \(.visible)"'
+interval=1
+
+# CPU Usage
+[cpu_usage]
+command=awk -v prefix=" " '/^cpu / {printf(prefix "%.0f%", $(NF-3)*100/($(NF-4)+$(NF-3)))}' < /proc/stat
+interval=2
+label=CPU:
+separator=false
+
+# Memory Usage
+[memory]
+command=awk -v prefix=" " '/^MemAvailable:/ { available=$2 } /^MemTotal:/ { total=$2 } END { printf(prefix "%.0f%", (total - available) / total * 100) }' < /proc/meminfo
+interval=5
+label=RAM:
+separator=false
+
+# Battery
+[battery]
+command=upower -i $(upower -e | grep BAT) | awk -v prefix=" " '/percentage/ {print prefix $2}'
+interval=60
+label=Battery:
+
+# WiFi
+[wifi]
+command=iwgetid -r
+interval=5
+label=WiFi:
+
+# Date and Time
+[time]
+command=date '+%Y-%m-%d %H:%M:%S'
+interval=1
+label=
+

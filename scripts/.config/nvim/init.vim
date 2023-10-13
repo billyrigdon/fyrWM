@@ -16,3 +16,5 @@ set tabstop=2
 set shiftwidth=2
 set expandtab
 colorscheme dracula
+inoremap <silent><expr> <TAB> pumvisible() ? "\<C-y>" : "\<TAB>"
+
