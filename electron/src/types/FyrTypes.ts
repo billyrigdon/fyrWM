@@ -51,5 +51,7 @@ export interface FyrWindow {
   // Was the currentWindow when this on was launched
   horizontalParentId?: number;
   verticalParentId?: number;
+  horizontalChildId: number;
+  verticalChildId: number;
   lastSplitType?: SplitDirection;
 }
