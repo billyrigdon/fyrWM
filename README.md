@@ -19,11 +19,9 @@ The instructions are meant to be run a fresh arch install and are mainly just to
 
 ```
 #Clone repo
-git clone https://github.com/billyrigdon/nodeWM.git;
+git clone https://github.com/billyrigdon/fyrWM.git;
 cd nodeWM/scripts;
-```
 
-```
 # Run separately \(changes your shell and installs a buttload of deps and tools\)
 ./0_install_deps.sh;
 ./1_shell_setup.sh;
