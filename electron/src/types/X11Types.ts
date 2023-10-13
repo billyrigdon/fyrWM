@@ -568,7 +568,7 @@ export interface XStandardAtoms {
 }
 
 // https://github.com/sidorares/node-x11/wiki/Core-requests
-export interface IXClient {
+export interface IXClient extends IX11Client{
   atoms: XStandardAtoms;
 
   screenNum: number;
