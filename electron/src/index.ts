@@ -31,7 +31,8 @@ let launcherWid: number = null;
 let launcherWindow: BrowserWindow = null;
 let launcherInited: boolean = false;
 let allOpenedFyrWindows: Set<FyrWindow> = new Set();
-
+let wmClassAtom;
+let stringAtom;
 // Track all open x11 windows
 const openedWindows: Set<number> = new Set();
 
@@ -47,11 +48,6 @@ const config: FyrConfig = (() => {
     const rawData = fs.readFileSync(configPath, "utf-8");
     return JSON.parse(rawData);
   } catch (err) {
-    logToFile(
-      wmLogFilePath,
-      `Could not read config file, creating a new one with default setting`,
-      LogLevel.DEBUG
-    );
     const dirPath = path.dirname(configPath);
     if (!fs.existsSync(dirPath)) {
       fs.mkdirSync(dirPath, { recursive: true });
@@ -72,31 +68,58 @@ const config: FyrConfig = (() => {
 const setWallpaper = (wid: number) => {
   const wallpaperPath = config.customizations.wallpaperPath;
   const command = `feh --bg-scale ${wallpaperPath}`;
-  logToFile(
-    wmLogFilePath,
-    `Setting wallpaper from ${wallpaperPath} with command ${command}`,
-    LogLevel.INFO
-  );
 
   exec(command, (error) => {
     if (error) {
-      logToFile(
-        wmLogFilePath,
-        `Failed to set wallpaper: ${error}. Is 'feh' installed?`,
-        LogLevel.ERROR
-      );
     } else {
     }
   });
 };
 
-const initDesktop = (display: XDisplay) => {
+// Needs picom installed, set window class to electronTransparent for a fully transparent window.
+const initCompositing = () => {
+  const command = `picom -b --no-use-damage --config ~/.config/picom/picom.conf`;
+  exec(command, (err) => {
+    logToFile(wmLogFilePath, "PICOM" + err, LogLevel.ERROR);
+  });
+};
+
+const initDesktop = async (display: XDisplay) => {
   screen = display.screen[0];
   root = screen.root;
-
   X.MapWindow(root);
   setWallpaper(root);
   return root;
+};
+
+const isTopLevelApplication = async (windowId: number): Promise<boolean> => {
+  return new Promise((resolve, reject) => {
+    // Query the tree structure from the parent window to children
+    X.QueryTree(windowId, (err, tree) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      // If the parent of the window is the root window, it's a top-level window
+      if (tree.parent === root) {
+        // Further checks can be added here, such as checking window attributes for override-redirect flag
+        X.GetWindowAttributes(windowId, (err, attrs) => {
+          if (err) {
+            reject(err);
+            return;
+          }
+          // Make sure the window is not an override-redirect window (like a tooltip or a menu)
+          if (!attrs.overrideRedirect) {
+            resolve(true);
+          } else {
+            resolve(false);
+          }
+        });
+      } else {
+        resolve(false);
+      }
+    });
+  });
 };
 
 const setCurrentResizableWindow = (
@@ -112,6 +135,9 @@ const setCurrentResizableWindow = (
   lastSplitType: SplitDirection
 ) => {
   if (windowId === launcherWid) return;
+
+  if (!isTopLevelApplication(windowId)) return;
+
   currentResizableWindow = {
     windowId,
     width,
@@ -145,29 +171,33 @@ const addFyrWind = (fyrWin: FyrWindow) => {
   allOpenedFyrWindows.add(fyrWin);
 };
 
-const openApp = (
+const openApp = async (
   appWid: number,
   splitDirection: number,
   currentWindowId?: number
 ): Promise<void> => {
-  logToFile(
-    wmLogFilePath,
-    "currentwindowid:" + currentWindowId,
-    LogLevel.ERROR
-  );
-  logToFile(wmLogFilePath, "launcher id:" + launcherWid, LogLevel.ERROR);
-
   if (launcherWid === appWid) {
     X.MapWindow(appWid);
     return;
   }
+
+  logToFile(
+    wmLogFilePath,
+    "NOT THE LAUNCHER: " + JSON.stringify(currentResizableWindow),
+    LogLevel.ERROR
+  );
+
+  const shouldRender = await isTopLevelApplication(appWid);
+
+  if (!shouldRender) return;
 
   if (!openedWindows.has(appWid)) openedWindows.add(appWid);
 
   if (openedWindows.size === 1) {
     // Gap
     X.ResizeWindow(appWid, screen.pixel_width - 10, screen.pixel_height - 10);
-    X.ReparentWindow(appWid, root, 5, 5);
+    // X.ReparentWindow(appWid, root, 5, 5);
+    X.MoveWindow(appWid, 5, 5);
     X.MapWindow(appWid);
     X.ChangeWindowAttributes(
       appWid,
@@ -231,7 +261,7 @@ const openApp = (
 
       // Resize incoming window and map window
       X.ResizeWindow(appWid, newWidth, currentResizableWindow.height);
-      X.ReparentWindow(appWid, root, newX, currentResizableWindow.y);
+      X.MoveWindow(appWid, newX, currentResizableWindow.y);
       X.MapWindow(appWid);
 
       if (currentResizableWindow.horizontalChildId) {
@@ -315,7 +345,7 @@ const openApp = (
 
       // Resize incoming window and map window
       X.ResizeWindow(appWid, currentResizableWindow.width, newHeight);
-      X.ReparentWindow(appWid, root, currentResizableWindow.x, newY);
+      X.MoveWindow(appWid, currentResizableWindow.x, newY);
       X.MapWindow(appWid);
 
       if (currentResizableWindow.verticalChildId) {
@@ -365,7 +395,7 @@ const openApp = (
             x11.eventMask.Exposure,
         },
         (err) => {
-          logToFile(wmLogFilePath, JSON.stringify(err), LogLevel.ERROR);
+          // logToFile(wmLogFilePath, JSON.stringify(err), LogLevel.ERROR);
         }
       );
 
@@ -409,11 +439,11 @@ const resizeAndMapFyrWindow = (fyrWin: FyrWindow) => {
   logToFile(
     wmLogFilePath,
     "RESIZE AND MAP: " + JSON.stringify(fyrWin),
-    LogLevel.ERROR
+    LogLevel.DEBUG
   );
-  // Resize, reparent, remap
+  // Resize, remap
   X.ResizeWindow(fyrWin.windowId, fyrWin.width, fyrWin.height);
-  X.ReparentWindow(fyrWin.windowId, root, fyrWin.x, fyrWin.y);
+  X.MoveWindow(fyrWin.windowId, fyrWin.x, fyrWin.y);
   X.MapWindow(fyrWin.windowId);
 };
 
@@ -613,7 +643,7 @@ const findCurrentWindow = (wid: number): FyrWindow => {
 };
 
 const initX11Client = async () => {
-  client = createClient((err, display: XDisplay) => {
+  client = await createClient(async (err, display: XDisplay) => {
     if (err) {
       logToFile(
         wmLogFilePath,
@@ -624,8 +654,23 @@ const initX11Client = async () => {
     }
 
     X = display.client;
-    initDesktop(display);
+    await initDesktop(display);
     // GetPropertyAsync = promisify(X.GetProperty).bind(X);
+
+    X.InternAtom(false, "WM_CLASS", (err, atom) => {
+      if (err) {
+        console.error(err);
+        return;
+      }
+      wmClassAtom = atom;
+      X.InternAtom(false, "STRING", (err, atom) => {
+        if (err) {
+          console.error(err);
+          return;
+        }
+        stringAtom = atom;
+      });
+    });
 
     X.ChangeWindowAttributes(
       root,
@@ -645,9 +690,7 @@ const initX11Client = async () => {
       }
     );
 
-    X.on("event", (ev) => {
-      logToFile(wmLogFilePath, JSON.stringify(ev), LogLevel.ERROR);
-    });
+    X.on("event", (ev) => {});
 
     // Capture keyboard, mouse, and window events
     client.on("event", async (ev: IXEvent) => {
@@ -655,12 +698,6 @@ const initX11Client = async () => {
       const { type } = ev;
       switch (type) {
         case X11_EVENT_TYPE.KeyPress:
-          logToFile(wmLogFilePath, "KEY PRESSED", LogLevel.DEBUG);
-          logToFile(
-            wmLogFilePath,
-            "CURRENT WINDOW:" + JSON.stringify(findCurrentWindow(ev.wid)),
-            LogLevel.DEBUG
-          );
           if (ev.wid === launcherWid) return;
           const focusedWindow =
             ev.wid && ev.wid !== launcherWid ? findCurrentWindow(ev.wid) : null;
@@ -697,7 +734,7 @@ const initX11Client = async () => {
           currentWindowId = ev.wid !== launcherWid ? ev.wid : currentWindowId;
           break;
         case X11_EVENT_TYPE.DestroyNotify:
-          logToFile(wmLogFilePath, JSON.stringify(ev.name), LogLevel.ERROR);
+          logToFile(wmLogFilePath, JSON.stringify(ev.name), LogLevel.DEBUG);
           if (openedWindows.has(ev.wid)) {
             openedWindows.delete(ev.wid);
           }
@@ -716,6 +753,7 @@ const initX11Client = async () => {
         case X11_EVENT_TYPE.UnmapNotify:
           break;
         case X11_EVENT_TYPE.MapNotify:
+          logToFile(wmLogFilePath, JSON.stringify(ev), LogLevel.DEBUG);
           break;
         case X11_EVENT_TYPE.MapRequest:
           break;
@@ -744,23 +782,20 @@ const getElectronWindowId = (browserWindow: BrowserWindow): number => {
   return wid;
 };
 
-app.whenReady().then(() => {
-  initX11Client();
+app.whenReady().then(async () => {
+  await initX11Client();
+  initCompositing();
   const launcherShortcut = globalShortcut.register("Super+Space", () => {
     if (launcherWid && launcherWindow.isVisible()) {
       launcherWindow.hide();
     } else if (launcherInited) {
       launcherWindow.show();
+      X.RaiseWindow(launcherWid);
     } else {
       openLauncher();
     }
   });
   if (!launcherShortcut) {
-    logToFile(
-      wmLogFilePath,
-      "Launcher keyboard registration failed :(",
-      LogLevel.ERROR
-    );
   }
 
   const closeAppShortcut = globalShortcut.register("Super+Q", () => {
@@ -769,7 +804,6 @@ app.whenReady().then(() => {
     }
   });
   if (!closeAppShortcut) {
-    logToFile(wmLogFilePath, "Can't register app-close combo", LogLevel.ERROR);
   }
 
   // Exit wm
@@ -777,55 +811,24 @@ app.whenReady().then(() => {
     app.quit();
   });
   if (!closeWMShortcut) {
-    logToFile(
-      wmLogFilePath,
-      "You can check out any time you like, but you can never leave.",
-      LogLevel.ERROR
-    );
   }
 
   // Window split directions
   const horizontalSplitShortcut = globalShortcut.register("Super+H", () => {
-    logToFile(
-      wmLogFilePath,
-      "Setting split direction to horizontal",
-      LogLevel.INFO
-    );
     splitDirection = SplitDirection.Horizontal;
   });
 
   if (!horizontalSplitShortcut) {
-    logToFile(
-      wmLogFilePath,
-      "Horizontal split keyboard registration failed :(",
-      LogLevel.ERROR
-    );
   }
 
   try {
     const verticalSplitShortcut = globalShortcut.register("Super+V", () => {
-      logToFile(
-        wmLogFilePath,
-        "Setting split direction to vertical",
-        LogLevel.INFO
-      );
       splitDirection = SplitDirection.Vertical;
     });
 
     if (!verticalSplitShortcut) {
-      logToFile(
-        wmLogFilePath,
-        "Vertical split keyboard registration failed :(",
-        LogLevel.ERROR
-      );
     }
-  } catch (err) {
-    logToFile(
-      wmLogFilePath,
-      "Vertical split keyboard registration failed :(",
-      LogLevel.ERROR
-    );
-  }
+  } catch (err) {}
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) initX11Client();
@@ -834,7 +837,6 @@ app.whenReady().then(() => {
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
-    // Unregister all shortcuts.
   }
 });
 
@@ -846,21 +848,10 @@ ipcMain.on("onLaunchApp", (event, appCommand) => {
   });
   launcherWindow.hide();
 
-  child.on("error", (error) => {
-    logToFile(
-      wmLogFilePath,
-      `Failed to start child process: ${error}`,
-      LogLevel.ERROR
-    );
-  });
+  child.on("error", (error) => {});
 
   child.on("exit", (code) => {
     if (code !== null) {
-      logToFile(
-        wmLogFilePath,
-        `Child process exited with code ${code}`,
-        LogLevel.DEBUG
-      );
     }
   });
 });
@@ -889,27 +880,26 @@ ipcMain.handle("getApps", async () => {
           }
         }
       }
-    } catch (err) {
-      logToFile(
-        wmLogFilePath,
-        `Could not read directory ${path}: ${err}`,
-        LogLevel.ERROR
-      );
-    }
+    } catch (err) {}
   }
 
   return apps;
 });
 
+const setWindowClass = (windowId, className) => {
+  const value = Buffer.from(`${className}\0${className}\0`, "binary");
+
+  X.ChangeProperty(0, windowId, wmClassAtom, stringAtom, 8, value);
+};
+
 const openLauncher = () => {
   const [width, height] = [screen.pixel_width, screen.pixel_height];
 
-  // Calculate the x and y coordinates to center the window
-  const [x, y] = [Math.round((width - 400) / 2), Math.round((height - 60) / 2)];
+  const [x, y] = [0, 0];
 
   launcherWindow = new BrowserWindow({
-    width: 400,
-    height: 60,
+    width,
+    height,
     x,
     y,
     frame: false,
@@ -918,7 +908,7 @@ const openLauncher = () => {
     movable: false,
     focusable: true,
     skipTaskbar: true,
-    backgroundColor: "#ffffff", // white background
+    backgroundColor: "#ffffff",
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
@@ -927,11 +917,13 @@ const openLauncher = () => {
 
   launcherWindow.webContents.loadFile("./dist/vue/app-launcher.html");
 
-  launcherWindow.setFullScreen(false);
+  launcherWindow.setFullScreen(true);
   launcherWindow.setFocusable(true);
   launcherWindow.setAlwaysOnTop(true);
   launcherWid = getElectronWindowId(launcherWindow);
-  X.ReparentWindow(launcherWid, root, x, y);
+  launcherInited = true;
+  setWindowClass(launcherWid, "electronTransparent");
+  X.RaiseWindow(launcherWid);
   X.MapWindow(launcherWid);
 };
 
@@ -954,11 +946,6 @@ const checkIfGuiApp = async (windowId: number): Promise<boolean> => {
         prop.data.includes(X.atoms["_NET_WM_WINDOW_TYPE_DIALOG"]);
 
       if (isGui) {
-        logToFile(
-          wmLogFilePath,
-          `${windowId} is a GUI application. Launching now.`,
-          LogLevel.INFO
-        );
       }
 
       return isGui;
@@ -966,11 +953,6 @@ const checkIfGuiApp = async (windowId: number): Promise<boolean> => {
       return false;
     }
   } catch (err) {
-    logToFile(
-      wmLogFilePath,
-      `An error occurred while checking if ${windowId} is a GUI application: ${err}`,
-      LogLevel.ERROR
-    );
     throw err;
   }
 };
