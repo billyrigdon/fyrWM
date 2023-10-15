@@ -73,23 +73,36 @@ const setWallpaper = () => {
   exec(command, (error) => {
     if (error) {
     } else {
+      logToFile(wmLogFilePath, "Failed to set wallpaper", LogLevel.ERROR);
     }
   });
 };
 
-// Needs picom installed, set window class to electronTransparent for a fully transparent window.
-const initCompositing = () => {
-  const command = `picom -b --config ~/.config/picom/picom.conf`;
+const setXRootCursor = (): void => {
+  const command = `xsetroot -cursor_name arrow`;
   exec(command, (err) => {
-    logToFile(wmLogFilePath, "PICOM" + err, LogLevel.ERROR);
+    logToFile(wmLogFilePath, "Failed to set cursor", LogLevel.ERROR);
   });
 };
 
-const initDesktop = async (display: XDisplay) => {
+// Needs picom installed, set window class to electronTransparent for a fully transparent window.
+const initCompositing = (): void => {
+  const command = `picom -b --config ~/.config/picom/picom.conf`;
+  exec(command, (err) => {
+    logToFile(
+      wmLogFilePath,
+      "Failed to initialize compositor" + err,
+      LogLevel.ERROR
+    );
+  });
+};
+
+const initDesktop = async (display: XDisplay): Promise<number> => {
   screen = display.screen[0];
   root = screen.root;
   X.MapWindow(root);
   setWallpaper();
+  setXRootCursor();
   return root;
 };
 
