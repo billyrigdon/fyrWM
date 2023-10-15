@@ -29,6 +29,7 @@ module.exports = [
     // Configuration for Vue
     entry: {
       "app-launcher": "./vue/src/components/app-launcher/index.ts",
+      "desktop": "./vue/src/components/desktop/index.ts"
     },
     target: "electron-renderer",
     node: {
@@ -71,6 +72,11 @@ module.exports = [
         filename: "app-launcher.html",
         template: "./vue/public/index.html",
         chunks: ["app-launcher"],
+      }),
+      new HtmlWebpackPlugin({
+        filename: "desktop.html",
+        template: "./vue/public/index.html",
+        chunks: ["desktop"],
       }),
       new webpack.DefinePlugin({
         BASE_URL: JSON.stringify("./"),

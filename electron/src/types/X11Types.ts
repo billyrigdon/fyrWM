@@ -632,7 +632,7 @@ export interface IXClient extends IX11Client {
   ChangeSaveSet(a: number, wid: number): void;
   ChangeWindowAttributes(
     wid: number,
-    values: { eventMask: unknown },
+    values: { cursor?: unknown, eventMask: unknown },
     callback: XCbWithErr<[void], { error: number }>
   ): void;
   ClearArea(...args: unknown[]): unknown;
