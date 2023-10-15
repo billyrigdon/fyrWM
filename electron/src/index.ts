@@ -508,33 +508,55 @@ const findBestParentMatch = (
   let horizParents: Array<FyrWindow> = [];
 
   allOpenedFyrWindows.forEach((parentWindow) => {
-    // Parents sharing a vertical border
-    if (parentWindow.y + parentWindow.height + 5 === childWindow.y) {
-      if (
-        parentWindow.x + parentWindow.width + 5 >= childWindow.x &&
-        parentWindow.x + parentWindow.width + 5 <=
-          childWindow.x + childWindow.width + 5
-      ) {
-        vertParentWidth += parentWindow.width;
-        vertParents = vertParents.concat([parentWindow]);
+    if (parentWindow.windowId !== childWindow.windowId) {
+      if (parentWindow.y + parentWindow.height + 5 === childWindow.y) {
+        // Parents sharing a vertical border
+        if (
+          parentWindow.x + parentWindow.width >= childWindow.x &&
+          parentWindow.x + parentWindow.width <=
+            childWindow.x + childWindow.width
+        ) {
+          vertParentWidth += parentWindow.width;
+          vertParents = vertParents.concat([parentWindow]);
+        }
       }
-    }
 
-    if (parentWindow.x + parentWindow.width + 5 === childWindow.x) {
-      if (
-        parentWindow.y + parentWindow.height + 5 >= childWindow.y &&
-        parentWindow.y + parentWindow.height + 5 <=
-          childWindow.y + childWindow.height + 5
-      ) {
-        horizParentHeight += parentWindow.height;
-        horizParents = horizParents.concat([parentWindow]);
+      if (parentWindow.x + parentWindow.width + 5 === childWindow.x) {
+        logToFile(
+          wmLogFilePath,
+          "FIRST HORIZ PARENT CONDITION MET",
+          LogLevel.ERROR
+        );
+        logToFile(
+          wmLogFilePath,
+          "HORIZ PARENT:" + JSON.stringify(parentWindow),
+          LogLevel.ERROR
+        );
+        logToFile(
+          wmLogFilePath,
+          "HORIZ CHILD:" + JSON.stringify(childWindow),
+          LogLevel.ERROR
+        );
+        if (
+          parentWindow.y + parentWindow.height >= childWindow.y &&
+          parentWindow.y + parentWindow.height <=
+            childWindow.y + childWindow.height
+        ) {
+          logToFile(
+            wmLogFilePath,
+            "SECOND HORIZ PARENT CONDITION MET",
+            LogLevel.ERROR
+          );
+          horizParentHeight += parentWindow.height;
+          horizParents = horizParents.concat([parentWindow]);
+        }
       }
     }
   });
 
-  if (vertParentWidth + 5 === childWindow.width) {
+  if (vertParentWidth === childWindow.width) {
     return [vertParents, SplitDirection.Vertical];
-  } else if (horizParentHeight + 5 === childWindow.height) {
+  } else if (horizParentHeight === childWindow.height) {
     return [horizParents, SplitDirection.Horizontal];
   } else {
     logToFile(wmLogFilePath, "COULDNT RESIZE PARENTS", LogLevel.INFO);
@@ -643,7 +665,8 @@ const resizeRepositionRechildParents = (
   splitType: SplitDirection
 ): void => {
   let immediateParent: FyrWindow;
-
+  let width: number;
+  let height: number;
   parents.forEach((parentWindow) => {
     if (
       parentWindow.horizontalChildId === childWindow.windowId ||
@@ -653,7 +676,7 @@ const resizeRepositionRechildParents = (
     }
 
     if (splitType === SplitDirection.Horizontal) {
-      const width = parentWindow.width + childWindow.width + 5;
+      width = parentWindow.width + childWindow.width + 5;
       deleteFyrWin(parentWindow.windowId);
       addFyrWind({
         ...parentWindow,
@@ -661,7 +684,7 @@ const resizeRepositionRechildParents = (
       });
       X.ResizeWindow(parentWindow.windowId, width, parentWindow.height);
     } else if (splitType === SplitDirection.Vertical) {
-      const height = parentWindow.height + childWindow.height + 5;
+      height = parentWindow.height + childWindow.height + 5;
       deleteFyrWin(parentWindow.windowId);
       addFyrWind({
         ...parentWindow,
@@ -671,22 +694,24 @@ const resizeRepositionRechildParents = (
     }
   });
 
-  // Already resized, just reparent
   if (!immediateParent) {
     logToFile(wmLogFilePath, "COULDNT FIND IMMEDIATE PARENT");
     return;
   }
+  // Assign new grandchildren windows
   if (splitType === SplitDirection.Horizontal) {
     deleteFyrWin(immediateParent.windowId);
     addFyrWind({
       ...immediateParent,
-      horizontalChildId: childWindow.windowId,
+      horizontalChildId: childWindow.horizontalChildId,
+      width,
     });
   } else if (splitType === SplitDirection.Vertical) {
     deleteFyrWin(immediateParent.windowId);
     addFyrWind({
       ...immediateParent,
-      verticalChildId: childWindow.windowId,
+      verticalChildId: childWindow.verticalChildId,
+      height,
     });
   }
 };
