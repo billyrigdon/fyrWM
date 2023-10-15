@@ -14,29 +14,32 @@ import {
   IXEvent,
   IXScreen,
   X11_EVENT_TYPE,
-  XFocusRevertTo,
-  XPropMode,
 } from "./types/X11Types";
 const x11: IX11Mod = require("x11");
-
-// Globals
 const wmLogFilePath = join(homedir(), ".fyr", "logs", "wm.log");
+
+// x11
 let X: IXClient;
 let client: IX11Client;
 let root: number;
-let currentWindowId: number | null = null;
-let currentResizableWindow: FyrWindow = null;
 let screen: IXScreen = null;
-let GetPropertyAsync: (...args) => Promise<any>;
+
+// Switched with Super + V or Super + H, determines window split
 let splitDirection = SplitDirection.Horizontal;
+
 let launcherWid: number = null;
 let launcherWindow: BrowserWindow = null;
 let launcherInited: boolean = false;
-let allOpenedFyrWindows: Set<FyrWindow> = new Set();
+
+// Used by compositor
 let wmClassAtom;
 let stringAtom;
+
 // Track all open x11 windows
 const openedWindows: Set<number> = new Set();
+const allOpenedFyrWindows: Set<FyrWindow> = new Set();
+let currentWindowId: number | null = null;
+let currentResizableWindow: FyrWindow = null;
 
 // Get user settings. Called immediately
 const config: FyrConfig = (() => {
@@ -55,7 +58,7 @@ const config: FyrConfig = (() => {
       fs.mkdirSync(dirPath, { recursive: true });
     }
 
-    // Write the default config to the file
+    // Write the default config to the file if failure to read config
     fs.writeFileSync(
       configPath,
       JSON.stringify(defaultFyrConfig, null, 2),
@@ -79,6 +82,7 @@ const setWallpaper = () => {
   });
 };
 
+// Gets rid of X cursor when mouse is over desktop root
 const setXRootCursor = (): void => {
   const command = `xsetroot -cursor_name arrow`;
   exec(command, (err) => {
@@ -107,36 +111,7 @@ const initDesktop = async (display: XDisplay): Promise<number> => {
   return root;
 };
 
-const isTopLevelApplication = async (windowId: number): Promise<boolean> => {
-  return new Promise((resolve, reject) => {
-    // Query the tree structure from the parent window to children
-    X.QueryTree(windowId, (err, tree) => {
-      if (err) {
-        reject(err);
-        return;
-      }
-      // If the parent of the window is the root window, it's a top-level window
-      if (tree.parent === root) {
-        // Further checks can be added here, such as checking window attributes for override-redirect flag
-        X.GetWindowAttributes(windowId, (err, attrs) => {
-          if (err) {
-            reject(err);
-            return;
-          }
-          // Make sure the window is not an override-redirect window (like a tooltip or a menu)
-          if (!attrs.overrideRedirect) {
-            resolve(true);
-          } else {
-            resolve(false);
-          }
-        });
-      } else {
-        resolve(false);
-      }
-    });
-  });
-};
-
+// Everything depends on this
 const setCurrentResizableWindow = (
   windowId: number,
   width: number,
@@ -167,15 +142,17 @@ const setCurrentResizableWindow = (
   };
 };
 
-const deleteFyrWin = (wid: number) => {
+const findFyrWindow = (wid: number): FyrWindow => {
+  let foundWindow: FyrWindow = null;
   allOpenedFyrWindows.forEach((win) => {
     if (win.windowId === wid) {
-      allOpenedFyrWindows.delete(win);
-      return;
+      foundWindow = win;
     }
   });
+  return foundWindow;
 };
 
+// Redundantly remove item just in case
 const addFyrWind = (fyrWin: FyrWindow) => {
   if (fyrWin.windowId === launcherWid) return;
   allOpenedFyrWindows.forEach((win) => {
@@ -186,6 +163,34 @@ const addFyrWind = (fyrWin: FyrWindow) => {
   allOpenedFyrWindows.add(fyrWin);
 };
 
+// Verifies that item should have tiling logic applied
+const isTopLevelApplication = async (windowId: number): Promise<boolean> => {
+  return new Promise((resolve, reject) => {
+    X.QueryTree(windowId, (err, tree) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      if (tree.parent === root) {
+        X.GetWindowAttributes(windowId, (err, attrs) => {
+          if (err) {
+            reject(err);
+            return;
+          }
+          if (!attrs.overrideRedirect) {
+            resolve(true);
+          } else {
+            resolve(false);
+          }
+        });
+      } else {
+        resolve(false);
+      }
+    });
+  });
+};
+
+// Handles map requests and determines size of tiles
 const openApp = async (
   appWid: number,
   splitDirection: number,
@@ -195,12 +200,6 @@ const openApp = async (
     X.MapWindow(appWid);
     return;
   }
-
-  logToFile(
-    wmLogFilePath,
-    "NOT THE LAUNCHER: " + JSON.stringify(currentResizableWindow),
-    LogLevel.ERROR
-  );
 
   const shouldRender = await isTopLevelApplication(appWid);
 
@@ -280,10 +279,9 @@ const openApp = async (
       X.MapWindow(appWid);
 
       if (currentResizableWindow.horizontalChildId) {
-        const newChild = findCurrentWindow(
+        const newChild = findFyrWindow(
           currentResizableWindow.horizontalChildId
         );
-        deleteFyrWin(newChild.horizontalChildId);
         addFyrWind({
           ...newChild,
           horizontalParentId: appWid,
@@ -307,7 +305,6 @@ const openApp = async (
       });
 
       // Modify existing window
-      deleteFyrWin(currentResizableWindow.windowId);
       addFyrWind({
         ...currentResizableWindow,
         width: newWidth,
@@ -364,10 +361,7 @@ const openApp = async (
       X.MapWindow(appWid);
 
       if (currentResizableWindow.verticalChildId) {
-        const newChild = findCurrentWindow(
-          currentResizableWindow.verticalChildId
-        );
-        deleteFyrWin(newChild.verticalChildId);
+        const newChild = findFyrWindow(currentResizableWindow.verticalChildId);
         addFyrWind({
           ...newChild,
           horizontalParentId: appWid,
@@ -389,7 +383,6 @@ const openApp = async (
       });
 
       // Modify existing window
-      deleteFyrWin(currentResizableWindow.windowId);
       addFyrWind({
         ...currentResizableWindow,
         height: newHeight,
@@ -455,26 +448,24 @@ const findBestChildrenMatch = (
       win.y === parentWindow.y &&
       win.height === parentWindow.height
     ) {
+      logToFile(wmLogFilePath, "HORIZ DIRECT CHILD", LogLevel.DEBUG);
       return [[win], SplitDirection.Horizontal];
-    }
-
-    if (
+    } else if (
       win.windowId === parentWindow.verticalChildId &&
       win.x === parentWindow.x &&
       win.width === parentWindow.width
     ) {
+      logToFile(wmLogFilePath, "VERT DIRECT CHILD", LogLevel.DEBUG);
       return [[win], SplitDirection.Vertical];
     }
 
     // If there's a failure in finding an exact child match, find all bordering children
 
     // Children sharing a vertical border
-    logToFile(wmLogFilePath, JSON.stringify(win), LogLevel.ERROR);
     if (
       win.y === parentWindow.y + parentWindow.height + 5 ||
       win.y === parentWindow.y + parentWindow.height
     ) {
-      logToFile(wmLogFilePath, "VERTICAL CHILD BORDER", LogLevel.ERROR);
       // If within the parents width:
       if (
         win.x >= parentWindow.x &&
@@ -494,27 +485,10 @@ const findBestChildrenMatch = (
       win.x === parentWindow.x + parentWindow.width + 5 ||
       win.x === parentWindow.x + parentWindow.width
     ) {
-      logToFile(wmLogFilePath, "HORIZONTAL CHILD BORDER", LogLevel.ERROR);
-      logToFile(
-        wmLogFilePath,
-        "HORIZONTAL CHILD" + JSON.stringify(win),
-        LogLevel.INFO
-      );
-      logToFile(wmLogFilePath, (win.y + win.height).toString(), LogLevel.INFO);
-      logToFile(
-        wmLogFilePath,
-        (parentWindow.y + parentWindow.height).toString(),
-        LogLevel.INFO
-      );
       if (
         win.y >= parentWindow.y &&
         win.y + win.height <= parentWindow.height + parentWindow.y + 10
       ) {
-        logToFile(
-          wmLogFilePath,
-          "HORIZONTAL CHILD CONDITIONS MET",
-          LogLevel.INFO
-        );
         horizChildrenHeight += win.height;
         horizChildren = horizChildren.concat([win]);
         if (horizChildren.length >= 2) {
@@ -524,16 +498,11 @@ const findBestChildrenMatch = (
     }
   }
 
-  logToFile(wmLogFilePath, JSON.stringify(vertChildrenWidth), LogLevel.ERROR);
-  // logToFile(wmLogFilePath, JSON.stringify(), LogLevel.ERROR);
-  logToFile(wmLogFilePath, JSON.stringify(parentWindow), LogLevel.ERROR);
-
   if (vertChildrenWidth === parentWindow.width) {
     return [vertChildren, SplitDirection.Vertical];
   } else if (horizChildrenHeight === parentWindow.height) {
     return [horizChildren, SplitDirection.Horizontal];
   } else {
-    logToFile(wmLogFilePath, "COULDNT RESIZE CHILDREN", LogLevel.INFO);
     return [[], null];
   }
 };
@@ -558,6 +527,22 @@ const findBestParentMatch = (
 
     // Find adjacent parent windows if not successful
     if (parentWindow.windowId !== childWindow.windowId) {
+      // Look for direct matches first
+      if (
+        parentWindow.height === childWindow.height &&
+        parentWindow.x + parentWindow.width + 5 === childWindow.x
+      ) {
+        return [[parentWindow], SplitDirection.Horizontal];
+      }
+
+      if (
+        parentWindow.width === childWindow.width &&
+        parentWindow.y + parentWindow.height + 5 === childWindow.y
+      ) {
+        return [[parentWindow], SplitDirection.Horizontal];
+      }
+
+      // If no direct match, do the maths
       if (parentWindow.y + parentWindow.height + 5 === childWindow.y) {
         // Parents sharing a vertical border
         if (
@@ -571,37 +556,20 @@ const findBestParentMatch = (
       }
 
       if (parentWindow.x + parentWindow.width + 5 === childWindow.x) {
-        logToFile(
-          wmLogFilePath,
-          "FIRST HORIZ PARENT CONDITION MET",
-          LogLevel.ERROR
-        );
-        logToFile(
-          wmLogFilePath,
-          "HORIZ PARENT:" + JSON.stringify(parentWindow),
-          LogLevel.ERROR
-        );
-        logToFile(
-          wmLogFilePath,
-          "HORIZ CHILD:" + JSON.stringify(childWindow),
-          LogLevel.ERROR
-        );
         if (
           parentWindow.y + parentWindow.height >= childWindow.y &&
           parentWindow.y + parentWindow.height <=
             childWindow.y + childWindow.height
         ) {
-          logToFile(
-            wmLogFilePath,
-            "SECOND HORIZ PARENT CONDITION MET",
-            LogLevel.ERROR
-          );
           horizParentHeight += parentWindow.height;
           horizParents = horizParents.concat([parentWindow]);
         }
       }
     }
   });
+
+  logToFile(wmLogFilePath, JSON.stringify(vertParentWidth), LogLevel.DEBUG);
+  logToFile(wmLogFilePath, JSON.stringify(childWindow), LogLevel.DEBUG);
 
   if (vertParentWidth === childWindow.width) {
     return [vertParents, SplitDirection.Vertical];
@@ -636,7 +604,6 @@ const resizeRepositionReparentChildren = (
         childWindow.height,
       ];
       const [x, y]: [number, number] = [parent.x, childWindow.y];
-      deleteFyrWin(childWindow.windowId);
       addFyrWind({
         ...childWindow,
         width,
@@ -650,10 +617,9 @@ const resizeRepositionReparentChildren = (
         childWindow.height + parent.height + 5,
       ];
       const [x, y]: [number, number] = [childWindow.x, parent.y];
-      deleteFyrWin(childWindow.windowId);
       addFyrWind({
         ...childWindow,
-        height: childWindow.height + parent.height,
+        height,
         y: parent.y,
       });
       X.ResizeWindow(childWindow.windowId, width, height);
@@ -661,26 +627,7 @@ const resizeRepositionReparentChildren = (
     }
   });
 
-  if (!immediateVertChild) {
-    logToFile(
-      wmLogFilePath,
-      "RESIZED CHILDREN BUT NO IMMEDIATE VERTICAL CHILD FOUND",
-      LogLevel.ERROR
-    );
-    return;
-  }
-
-  if (!immediateHorzChild) {
-    logToFile(
-      wmLogFilePath,
-      "RESIZED CHILDREN BUT NO IMMEDIATE VERTICAL CHILD FOUND",
-      LogLevel.ERROR
-    );
-    return;
-  }
-
-  if (immediateHorzChild.horizontalParentId === parent.windowId) {
-    deleteFyrWin(immediateHorzChild.windowId);
+  if (immediateHorzChild?.horizontalParentId === parent.windowId) {
     addFyrWind({
       ...immediateHorzChild,
       x: parent.x,
@@ -688,8 +635,7 @@ const resizeRepositionReparentChildren = (
       verticalParentId: parent.verticalParentId,
       horizontalParentId: parent.horizontalParentId,
     });
-  } else if (immediateVertChild.verticalParentId === parent.windowId) {
-    deleteFyrWin(immediateVertChild.windowId);
+  } else if (immediateVertChild?.verticalParentId === parent.windowId) {
     addFyrWind({
       ...immediateVertChild,
       y: parent.y,
@@ -699,19 +645,17 @@ const resizeRepositionReparentChildren = (
     });
   }
 
-  // TODO: Should probably rename this function since it's been adapted for other uses
-  const horizontalParent = findCurrentWindow(parent.horizontalParentId);
-  const verticalParent = findCurrentWindow(parent.verticalParentId);
+  // Update parent's with new child Id's
+  const horizontalParent = findFyrWindow(parent.horizontalParentId);
+  const verticalParent = findFyrWindow(parent.verticalParentId);
 
   if (horizontalParent) {
-    deleteFyrWin(horizontalParent.windowId);
     addFyrWind({
       ...horizontalParent,
       horizontalChildId: immediateHorzChild.windowId,
     });
   }
   if (verticalParent) {
-    deleteFyrWin(verticalParent.windowId);
     addFyrWind({
       ...verticalParent,
       verticalChildId: immediateVertChild.windowId,
@@ -736,9 +680,9 @@ const resizeRepositionRechildParents = (
     if (parentWindow.verticalChildId === childWindow.windowId) {
       immediateVertParent = parentWindow;
     }
+
     if (splitType === SplitDirection.Horizontal) {
       width = parentWindow.width + childWindow.width + 5;
-      deleteFyrWin(parentWindow.windowId);
       addFyrWind({
         ...parentWindow,
         width,
@@ -746,7 +690,6 @@ const resizeRepositionRechildParents = (
       X.ResizeWindow(parentWindow.windowId, width, parentWindow.height);
     } else if (splitType === SplitDirection.Vertical) {
       height = parentWindow.height + childWindow.height + 5;
-      deleteFyrWin(parentWindow.windowId);
       addFyrWind({
         ...parentWindow,
         height,
@@ -755,33 +698,14 @@ const resizeRepositionRechildParents = (
     }
   });
 
-  if (!immediateVertParent) {
-    logToFile(
-      wmLogFilePath,
-      "COULDNT FIND IMMEDIATE VERT PARENT",
-      LogLevel.ERROR
-    );
-    return;
-  }
-
-  if (!immediateHorzParent) {
-    logToFile(
-      wmLogFilePath,
-      "COULDNT FIND IMMEDIATE HORZ PARENT",
-      LogLevel.ERROR
-    );
-  }
-
   // Assign new grandchildren windows
-  if (splitType === SplitDirection.Horizontal) {
-    deleteFyrWin(immediateHorzParent.windowId);
+  if (immediateHorzParent && splitType === SplitDirection.Horizontal) {
     addFyrWind({
       ...immediateHorzParent,
       horizontalChildId: childWindow.horizontalChildId,
       width,
     });
-  } else if (splitType === SplitDirection.Vertical) {
-    deleteFyrWin(immediateVertParent.windowId);
+  } else if (immediateVertParent && splitType === SplitDirection.Vertical) {
     addFyrWind({
       ...immediateVertParent,
       verticalChildId: childWindow.verticalChildId,
@@ -790,19 +714,10 @@ const resizeRepositionRechildParents = (
   }
 };
 
-const resizeOnDestroy = (winToDeleteId: number): void => {
-  const deletedWindow = findCurrentWindow(winToDeleteId);
-  // logToFile(wmLogFilePath, "DEleted wind" + JSON.stringify(de))
-  deleteFyrWin(deletedWindow.windowId);
-
-  if (deletedWindow.verticalChildId || deletedWindow.horizontalChildId) {
+const resizeOnDestroy = (deletedWindow: FyrWindow): void => {
+  if (deletedWindow) {
     const [childrenToResize, childSplitType] =
       findBestChildrenMatch(deletedWindow);
-    logToFile(
-      wmLogFilePath,
-      JSON.stringify([...childrenToResize]),
-      LogLevel.INFO
-    );
     if (childrenToResize?.length > 0) {
       resizeRepositionReparentChildren(
         deletedWindow,
@@ -831,214 +746,15 @@ const resizeOnDestroy = (winToDeleteId: number): void => {
   return;
 };
 
-const resizeAndMapFyrWindow = (fyrWin: FyrWindow) => {
-  logToFile(
-    wmLogFilePath,
-    "RESIZE AND MAP: " + JSON.stringify(fyrWin),
-    LogLevel.DEBUG
-  );
-  // Resize, remap
-  X.ResizeWindow(fyrWin.windowId, fyrWin.width, fyrWin.height);
-  X.MoveWindow(fyrWin.windowId, fyrWin.x, fyrWin.y);
-  X.MapWindow(fyrWin.windowId);
-};
-
-const resizeAdjacentWindows = (
-  parentWindow: FyrWindow,
-  direction: SplitDirection
-) => {
-  logToFile(
-    wmLogFilePath,
-    "WINDOW DELETED IS: " + JSON.stringify(parentWindow),
-    LogLevel.DEBUG
-  );
-  // If no children, resize parent
-  if (
-    (parentWindow.horizontalParentId || parentWindow.verticalParentId) &&
-    !parentWindow.horizontalChildId &&
-    !parentWindow.verticalChildId
-  ) {
-    logToFile(
-      wmLogFilePath,
-      "Resizing parent after window deletion",
-      LogLevel.DEBUG
-    );
-    let grandParentWindow: FyrWindow;
-    grandParentWindow = Array.from(allOpenedFyrWindows).find(
-      (win) => win.windowId === parentWindow.verticalParentId
-    );
-    if (!grandParentWindow) {
-      grandParentWindow = Array.from(allOpenedFyrWindows).find(
-        (win) => win.windowId === parentWindow.horizontalParentId
-      );
-    }
-    // If no grandParent, all windows are now closed
-    if (!grandParentWindow) {
-      logToFile(wmLogFilePath, "No window to resize", LogLevel.DEBUG);
-    }
-
-    if (parentWindow.horizontalParentId === grandParentWindow.windowId) {
-      logToFile(
-        wmLogFilePath,
-        "RESIZING PARENT HORIZONTAL:" + JSON.stringify(grandParentWindow),
-        LogLevel.DEBUG
-      );
-      //resize horizontal
-      const newFyrWin: FyrWindow = {
-        ...grandParentWindow,
-        width: grandParentWindow.width + parentWindow.width,
-        horizontalChildId: null,
-      };
-      deleteFyrWin(grandParentWindow.windowId);
-      addFyrWind(newFyrWin);
-      resizeAndMapFyrWindow(newFyrWin);
-      return;
-    } else if (parentWindow.verticalParentId === grandParentWindow.windowId) {
-      logToFile(
-        wmLogFilePath,
-        "RESIZING PARENT VERTICAL:" + JSON.stringify(grandParentWindow),
-        LogLevel.DEBUG
-      );
-      //resize vertical parent
-      const newFyrWin: FyrWindow = {
-        ...grandParentWindow,
-        height: grandParentWindow.height + parentWindow.height,
-        verticalChildId: null,
-      };
-      deleteFyrWin(grandParentWindow.windowId);
-      addFyrWind(newFyrWin);
-      resizeAndMapFyrWindow(newFyrWin);
-      return;
-    }
-  }
-
-  // If children
-  allOpenedFyrWindows.forEach((fyrWin) => {
-    if (direction === SplitDirection.Vertical) {
-      // If child top is on bottom border
-      if (parentWindow.y + parentWindow.height + 5 === fyrWin.y) {
-        // If bordering child is within the width of the current container
-        if (
-          fyrWin.x >= parentWindow.x &&
-          fyrWin.width + fyrWin.x <= parentWindow.x + parentWindow.width
-        ) {
-          //Resize window
-          const newFyrWin: FyrWindow = {
-            ...fyrWin,
-            height: fyrWin.height + parentWindow.height,
-            y: parentWindow.y,
-            horizontalParentId: parentWindow.horizontalParentId
-              ? parentWindow.horizontalParentId
-              : fyrWin.horizontalParentId,
-            verticalParentId: parentWindow.verticalParentId
-              ? parentWindow.verticalParentId
-              : fyrWin.verticalParentId,
-            horizontalChildId: parentWindow.horizontalChildId
-              ? parentWindow.horizontalChildId
-              : fyrWin.horizontalChildId,
-          };
-          deleteFyrWin(fyrWin.windowId);
-          addFyrWind(newFyrWin);
-
-          for (const win of [
-            findCurrentWindow(parentWindow.verticalParentId),
-            findCurrentWindow(parentWindow.horizontalParentId),
-          ]) {
-            if (win) {
-              if (win.windowId === parentWindow.verticalParentId) {
-                const grandParentWind: FyrWindow = {
-                  ...win,
-                  verticalChildId: newFyrWin.windowId,
-                };
-                deleteFyrWin(win.windowId);
-                addFyrWind(grandParentWind);
-              } else if (win.windowId === parentWindow.horizontalParentId) {
-                const grandParentWind: FyrWindow = {
-                  ...win,
-                  horizontalChildId: newFyrWin.windowId,
-                };
-                deleteFyrWin(win.windowId);
-                addFyrWind(grandParentWind);
-              }
-            }
-          }
-
-          resizeAndMapFyrWindow(newFyrWin);
-        }
-      }
-    } else if (direction === SplitDirection.Horizontal) {
-      if (parentWindow.x + parentWindow.width + 5 === fyrWin.x) {
-        if (
-          fyrWin.y >= parentWindow.y &&
-          fyrWin.height + fyrWin.y <= parentWindow.height + parentWindow.y
-        ) {
-          //Resize window
-          const newFyrWin: FyrWindow = {
-            ...fyrWin,
-            width: fyrWin.width + parentWindow.width,
-            x: parentWindow.x,
-            horizontalParentId: parentWindow.horizontalParentId
-              ? parentWindow.horizontalParentId
-              : fyrWin.horizontalParentId,
-            verticalParentId: parentWindow.verticalParentId
-              ? parentWindow.verticalParentId
-              : fyrWin.verticalParentId,
-            verticalChildId: parentWindow.verticalChildId
-              ? parentWindow.verticalChildId
-              : fyrWin.verticalChildId,
-          };
-          deleteFyrWin(fyrWin.windowId);
-          addFyrWind(newFyrWin);
-
-          for (const win of [
-            findCurrentWindow(parentWindow.verticalParentId),
-            findCurrentWindow(parentWindow.horizontalParentId),
-          ]) {
-            if (win) {
-              if (win.windowId === parentWindow.verticalParentId) {
-                const grandParentWind: FyrWindow = {
-                  ...win,
-                  verticalChildId: newFyrWin.windowId,
-                };
-                deleteFyrWin(win.windowId);
-                addFyrWind(grandParentWind);
-              } else if (win.windowId === parentWindow.horizontalParentId) {
-                const grandParentWind: FyrWindow = {
-                  ...win,
-                  horizontalChildId: newFyrWin.windowId,
-                };
-                deleteFyrWin(win.windowId);
-                addFyrWind(grandParentWind);
-              }
-            }
-          }
-          resizeAndMapFyrWindow(newFyrWin);
-        }
-      }
-    }
-  });
-};
-
+// Get window to delete and resize all windows
 const handleDestroyNotify = (wid: number) => {
-  // Get window to delete and resize all windows
-  let windowToDelete: FyrWindow = Array.from(allOpenedFyrWindows).find(
-    (win) => win.windowId === wid
-  );
+  const windowToDelete: FyrWindow = findFyrWindow(wid);
   if (windowToDelete) {
-    // deleteFyrWin(windowToDelete.windowId);
-    resizeOnDestroy(windowToDelete.windowId);
-  }
-  // resizeAdjacentWindows(windowToDelete, windowToDelete.lastSplitType);
-};
-
-const findCurrentWindow = (wid: number): FyrWindow => {
-  let foundWindow: FyrWindow = null;
-  allOpenedFyrWindows.forEach((win) => {
-    if (win.windowId === wid) {
-      foundWindow = win;
+    if (openedWindows.has(wid)) {
+      openedWindows.delete(wid);
+      resizeOnDestroy(windowToDelete);
     }
-  });
-  return foundWindow;
+  }
 };
 
 const initX11Client = async () => {
@@ -1088,17 +804,14 @@ const initX11Client = async () => {
       }
     );
 
-    X.on("event", (ev) => {});
-
     // Capture keyboard, mouse, and window events
     client.on("event", async (ev: IXEvent) => {
-      logToFile(wmLogFilePath, JSON.stringify(ev), LogLevel.DEBUG);
       const { type } = ev;
       switch (type) {
         case X11_EVENT_TYPE.KeyPress:
           if (ev.wid === launcherWid) return;
           const focusedWindow =
-            ev.wid && ev.wid !== launcherWid ? findCurrentWindow(ev.wid) : null;
+            ev.wid && ev.wid !== launcherWid ? findFyrWindow(ev.wid) : null;
           currentWindowId =
             ev.wid && ev.wid !== launcherWid ? ev.wid : currentWindowId;
           currentResizableWindow =
@@ -1107,19 +820,14 @@ const initX11Client = async () => {
               : currentResizableWindow;
           break;
         case X11_EVENT_TYPE.KeyRelease:
-          logToFile(wmLogFilePath, "KEY RELEASED", LogLevel.DEBUG);
           break;
         case X11_EVENT_TYPE.ButtonPress:
-          logToFile(wmLogFilePath, "BUTTON PRESSED", LogLevel.DEBUG);
-          logToFile(wmLogFilePath, JSON.stringify(ev), LogLevel.DEBUG);
           break;
         case X11_EVENT_TYPE.ButtonRelease:
-          logToFile(wmLogFilePath, "BUTTON RELEASED", LogLevel.DEBUG);
           break;
         case X11_EVENT_TYPE.MotionNotify:
           break;
         case X11_EVENT_TYPE.EnterNotify:
-          logToFile(wmLogFilePath, JSON.stringify(ev), LogLevel.DEBUG);
           break;
         case X11_EVENT_TYPE.LeaveNotify:
           break;
@@ -1132,10 +840,6 @@ const initX11Client = async () => {
           currentWindowId = ev.wid !== launcherWid ? ev.wid : currentWindowId;
           break;
         case X11_EVENT_TYPE.DestroyNotify:
-          logToFile(wmLogFilePath, JSON.stringify(ev.name), LogLevel.DEBUG);
-          if (openedWindows.has(ev.wid)) {
-            openedWindows.delete(ev.wid);
-          }
           handleDestroyNotify(ev.wid);
           if (currentWindowId === ev.wid) {
             if (openedWindows.size === 0) {
@@ -1144,14 +848,13 @@ const initX11Client = async () => {
             } else {
               // Last opened or focused window
               currentWindowId = Array.from(openedWindows).pop() || null;
-              currentResizableWindow = findCurrentWindow(currentWindowId);
+              currentResizableWindow = findFyrWindow(currentWindowId);
             }
           }
           break;
         case X11_EVENT_TYPE.UnmapNotify:
           break;
         case X11_EVENT_TYPE.MapNotify:
-          logToFile(wmLogFilePath, JSON.stringify(ev), LogLevel.DEBUG);
           break;
         case X11_EVENT_TYPE.MapRequest:
           break;
@@ -1323,34 +1026,4 @@ const openLauncher = () => {
   setWindowClass(launcherWid, "electronTransparent");
   X.RaiseWindow(launcherWid);
   X.MapWindow(launcherWid);
-};
-
-// TODO:
-const checkIfGuiApp = async (windowId: number): Promise<boolean> => {
-  try {
-    const prop = await GetPropertyAsync(
-      0,
-      windowId,
-      X.atoms["_NET_WM_WINDOW_TYPE"],
-      X.atoms["CARDINAL"],
-      0,
-      4
-    );
-
-    if (prop.data && prop.data.length) {
-      // Check if it's a normal or dialog window, these are usually GUI apps
-      const isGui =
-        prop.data.includes(X.atoms["_NET_WM_WINDOW_TYPE_NORMAL"]) ||
-        prop.data.includes(X.atoms["_NET_WM_WINDOW_TYPE_DIALOG"]);
-
-      if (isGui) {
-      }
-
-      return isGui;
-    } else {
-      return false;
-    }
-  } catch (err) {
-    throw err;
-  }
 };
