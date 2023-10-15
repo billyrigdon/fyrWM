@@ -448,14 +448,12 @@ const findBestChildrenMatch = (
       win.y === parentWindow.y &&
       win.height === parentWindow.height
     ) {
-      logToFile(wmLogFilePath, "HORIZ DIRECT CHILD", LogLevel.DEBUG);
       return [[win], SplitDirection.Horizontal];
     } else if (
       win.windowId === parentWindow.verticalChildId &&
       win.x === parentWindow.x &&
       win.width === parentWindow.width
     ) {
-      logToFile(wmLogFilePath, "VERT DIRECT CHILD", LogLevel.DEBUG);
       return [[win], SplitDirection.Vertical];
     }
 
@@ -567,9 +565,6 @@ const findBestParentMatch = (
       }
     }
   });
-
-  logToFile(wmLogFilePath, JSON.stringify(vertParentWidth), LogLevel.DEBUG);
-  logToFile(wmLogFilePath, JSON.stringify(childWindow), LogLevel.DEBUG);
 
   if (vertParentWidth === childWindow.width) {
     return [vertParents, SplitDirection.Vertical];
