@@ -565,6 +565,10 @@ const findBestParentMatch = (
   //   }
   // }
 
+  // if (openedWindows.size === 1) {
+  //   openedWindows.forEach(())
+  // }
+
   for (const parentWindow of Array.from(allOpenedFyrWindows)) {
     logToFile(
       wmLogFilePath,
@@ -963,14 +967,14 @@ const initX11Client = async () => {
         case X11_EVENT_TYPE.DestroyNotify:
           if (openedWindows.has(ev.wid)) handleDestroyNotify(ev.wid);
           if (currentWindowId === ev.wid) {
-            // if (openedWindows.size === 0) {
-            //   currentWindowId = null;
-            //   currentResizableWindow = null;
-            // } else {
-            //   // Last opened or focused window
-            //   currentWindowId = Array.from(openedWindows).pop() || null;
-            //   currentResizableWindow = findFyrWindow(currentWindowId);
-            // }
+            if (openedWindows.size === 0) {
+              currentWindowId = null;
+              currentResizableWindow = null;
+            } else {
+              // Last opened or focused window
+              currentWindowId = Array.from(openedWindows).pop() || null;
+              currentResizableWindow = findFyrWindow(currentWindowId);
+            }
           }
           break;
         case X11_EVENT_TYPE.UnmapNotify:
