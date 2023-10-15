@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=fyrOS
+Comment=This is my custom window manager
+Exec=/home/billy/.nvm/versions/node/v18.18.0/bin/electron /home/billy/Code/fyrWM
+Type=Application
+
