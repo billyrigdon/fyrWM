@@ -156,6 +156,15 @@ const findFyrWindow = (wid: number): FyrWindow => {
 // Redundantly remove item just in case
 const addFyrWind = (fyrWin: FyrWindow) => {
   if (fyrWin.windowId === launcherWid) return;
+  const existing = findFyrWindow(fyrWin.windowId);
+  if (existing) {
+    logToFile(
+      wmLogFilePath,
+      "EXISTS ALREADY:" + JSON.stringify(fyrWin),
+      LogLevel.ERROR
+    );
+  }
+
   allOpenedFyrWindows.forEach((win) => {
     if (win.windowId === fyrWin.windowId) {
       allOpenedFyrWindows.delete(win);
@@ -201,19 +210,19 @@ const isTopLevelApplication = async (windowId: number): Promise<boolean> => {
 };
 
 // Handles map requests and determines size of tiles
-const openApp = async (
+const openApp = (
   appWid: number,
   splitDirection: number,
   currentWindowId?: number
-): Promise<void> => {
+) => {
   if (launcherWid === appWid) {
     X.MapWindow(appWid);
     return;
   }
 
-  const shouldRender = await isTopLevelApplication(appWid);
+  // const shouldRender = await isTopLevelApplication(appWid);
 
-  if (!shouldRender) return;
+  // if (!shouldRender) return;
 
   if (!openedWindows.has(appWid)) openedWindows.add(appWid);
 
@@ -292,7 +301,7 @@ const openApp = async (
         const newChild = findFyrWindow(
           currentResizableWindow.horizontalChildId
         );
-        deleteFyrWin(newChild.horizontalChildId);
+        deleteFyrWin(newChild.windowId);
         addFyrWind({
           ...newChild,
           horizontalParentId: appWid,
@@ -667,10 +676,11 @@ const resizeRepositionReparentChildren = (
       addFyrWind({
         ...childWindow,
         width,
-        x: deletedParent.x,
+        x,
       });
       X.ResizeWindow(childWindow.windowId, width, height);
       X.MoveWindow(childWindow.windowId, x, y);
+      X.MapWindow(childWindow.windowId);
     } else if (splitType === SplitDirection.Vertical) {
       const [width, height]: [number, number] = [
         childWindow.width,
@@ -681,10 +691,11 @@ const resizeRepositionReparentChildren = (
       addFyrWind({
         ...childWindow,
         height,
-        y: deletedParent.y,
+        y,
       });
       X.ResizeWindow(childWindow.windowId, width, height);
       X.MoveWindow(childWindow.windowId, x, y);
+      X.MapWindow(childWindow.windowId);
     }
   });
 
@@ -712,25 +723,8 @@ const resizeRepositionReparentChildren = (
 
   //TODO: INVESTIGATE
   // Update parent's with new child Id's
-  const horizontalParent = findFyrWindow(deletedParent.horizontalParentId);
-  const verticalParent = findFyrWindow(deletedParent.verticalParentId);
-
-  if (horizontalParent) {
-    logToFile(wmLogFilePath, "UPDATING HORIZ PARENT", LogLevel.DEBUG);
-    deleteFyrWin(horizontalParent.windowId);
-    addFyrWind({
-      ...horizontalParent,
-      horizontalChildId: immediateHorzChild.windowId,
-    });
-  }
-  if (verticalParent) {
-    logToFile(wmLogFilePath, "UPDATING VERTICAL PARENT", LogLevel.DEBUG);
-    deleteFyrWin(verticalParent.windowId);
-    addFyrWind({
-      ...verticalParent,
-      verticalChildId: immediateVertChild.windowId,
-    });
-  }
+  // const horizontalParent = findFyrWindow(deletedParent.horizontalParentId);
+  // const verticalParent = findFyrWindow(deletedParent.verticalParentId);
 };
 
 const resizeRepositionRechildParents = (
@@ -751,14 +745,21 @@ const resizeRepositionRechildParents = (
     );
     if (
       childWindow.horizontalParentId === parentWindow.windowId ||
-      parentWindow.horizontalChildId === childWindow.windowId
+      parentWindow.horizontalChildId === childWindow.windowId ||
+      ((parentWindow.x + parentWindow.width + 5 === childWindow.x ||
+        parentWindow.x + parentWindow.width === childWindow.x) &&
+        parentWindow.y === childWindow.y)
     ) {
       immediateHorzParent = parentWindow;
     }
 
     if (
       parentWindow.verticalChildId === childWindow.windowId ||
-      childWindow.verticalParentId === parentWindow.windowId
+      childWindow.verticalParentId === parentWindow.windowId ||
+      // Sharing a vertical border and starting at the same X coordinate
+      ((parentWindow.y + parentWindow.height + 5 === childWindow.y ||
+        parentWindow.y + parentWindow.height === childWindow.y) &&
+        parentWindow.x === childWindow.x)
     ) {
       immediateVertParent = parentWindow;
     }
@@ -782,6 +783,7 @@ const resizeRepositionRechildParents = (
         width,
       });
       X.ResizeWindow(parentWindow.windowId, width, parentWindow.height);
+      X.MapWindow(parentWindow.windowId);
     } else if (splitType === SplitDirection.Vertical) {
       height = parentWindow.height + childWindow.height + 5;
       deleteFyrWin(parentWindow.windowId);
@@ -790,6 +792,7 @@ const resizeRepositionRechildParents = (
         height,
       });
       X.ResizeWindow(parentWindow.windowId, parentWindow.width, height);
+      X.MapWindow(parentWindow.windowId);
     }
   });
 
@@ -830,6 +833,8 @@ const resizeRepositionRechildParents = (
   });
 };
 
+// TODO: Deleting the wrong elements from allOpenedFyrWindows. Maybe in openApp?
+// Elements resize and move correctly, but it can't find them in the set
 const resizeOnDestroy = (deletedWindow: FyrWindow): void => {
   if (deletedWindow) {
     const [childrenToResize, childSplitType] =
