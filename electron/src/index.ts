@@ -374,7 +374,7 @@ const openApp = async (
 
       if (currentResizableWindow.verticalChildId) {
         const newChild = findFyrWindow(currentResizableWindow.verticalChildId);
-        deleteFyrWin(newChild.verticalChildId);
+        deleteFyrWin(newChild.windowId);
         addFyrWind({
           ...newChild,
           verticalParentId: appWid,
@@ -532,89 +532,68 @@ const findBestChildrenMatch = (
 
 // Same as children, one parenting side should match perfectly.
 const findBestParentMatch = (
-  childWindow: FyrWindow
+  deletedWindow: FyrWindow
 ): [Array<FyrWindow>, SplitDirection] => {
   let vertParentWidth = 0;
   let vertParents: Array<FyrWindow> = [];
   let horizParentHeight = 0;
   let horizParents: Array<FyrWindow> = [];
+  // First look by id and compare sizes, easiest route
+  for (const parentWindow of Array.from(allOpenedFyrWindows)) {
+    logToFile(wmLogFilePath, JSON.stringify(parentWindow), LogLevel.ERROR);
+    if (
+      (parentWindow.windowId === deletedWindow.horizontalParentId ||
+        deletedWindow.windowId === parentWindow.horizontalChildId) &&
+      deletedWindow.height === parentWindow.height
+    ) {
+      return [[parentWindow], SplitDirection.Horizontal];
+    }
 
-  logToFile(
-    wmLogFilePath,
-    "CHILD" + JSON.stringify(childWindow),
-    LogLevel.ERROR
-  );
-
-  // First look by id and compare sizes
-  // for (const parentWindow of Array.from(allOpenedFyrWindows)) {
-  //   logToFile(wmLogFilePath, JSON.stringify(parentWindow), LogLevel.ERROR);
-  //   if (
-  //     (parentWindow.windowId === childWindow.horizontalParentId ||
-  //       childWindow.windowId === parentWindow.horizontalChildId) &&
-  //     childWindow.height === parentWindow.height
-  //   ) {
-  //     return [[parentWindow], SplitDirection.Horizontal];
-  //   }
-
-  //   if (
-  //     (parentWindow.windowId === childWindow.verticalParentId ||
-  //       childWindow.windowId === parentWindow.verticalChildId) &&
-  //     childWindow.width === parentWindow.width
-  //   ) {
-  //     return [[parentWindow], SplitDirection.Vertical];
-  //   }
-  // }
-
-  // if (openedWindows.size === 1) {
-  //   openedWindows.forEach(())
-  // }
+    if (
+      (parentWindow.windowId === deletedWindow.verticalParentId ||
+        deletedWindow.windowId === parentWindow.verticalChildId) &&
+      deletedWindow.width === parentWindow.width
+    ) {
+      return [[parentWindow], SplitDirection.Vertical];
+    }
+  }
 
   for (const parentWindow of Array.from(allOpenedFyrWindows)) {
-    logToFile(
-      wmLogFilePath,
-      "RESIZING PARENTS DIRECT: " + JSON.stringify(parentWindow),
-      LogLevel.ERROR
-    );
     // Find adjacent parent windows if not successful
-    if (parentWindow.windowId !== childWindow.windowId) {
-      logToFile(
-        wmLogFilePath,
-        "POTENTIAL PARENT MATCH" + JSON.stringify(parentWindow),
-        LogLevel.DEBUG
-      );
+    if (parentWindow.windowId !== deletedWindow.windowId) {
       // Look for direct matches first
       if (
-        parentWindow.height === childWindow.height &&
-        parentWindow.x + parentWindow.width + 5 === childWindow.x
+        parentWindow.height === deletedWindow.height &&
+        parentWindow.x + parentWindow.width + 5 === deletedWindow.x
       ) {
         return [[parentWindow], SplitDirection.Horizontal];
       }
 
       if (
-        parentWindow.width === childWindow.width &&
-        parentWindow.y + parentWindow.height + 5 === childWindow.y
+        parentWindow.width === deletedWindow.width &&
+        parentWindow.y + parentWindow.height + 5 === deletedWindow.y
       ) {
         return [[parentWindow], SplitDirection.Vertical];
       }
 
       // If no direct match, do the maths
-      if (parentWindow.y + parentWindow.height + 5 === childWindow.y) {
+      if (parentWindow.y + parentWindow.height + 5 === deletedWindow.y) {
         // Parents sharing a vertical border
         if (
-          parentWindow.x + parentWindow.width >= childWindow.x &&
+          parentWindow.x >= deletedWindow.x &&
           parentWindow.x + parentWindow.width <=
-            childWindow.x + childWindow.width
+            deletedWindow.x + deletedWindow.width
         ) {
           vertParentWidth += parentWindow.width;
           vertParents = vertParents.concat([parentWindow]);
         }
       }
 
-      if (parentWindow.x + parentWindow.width + 5 === childWindow.x) {
+      if (parentWindow.x + parentWindow.width + 5 === deletedWindow.x) {
         if (
-          parentWindow.y + parentWindow.height >= childWindow.y &&
+          parentWindow.y >= deletedWindow.y &&
           parentWindow.y + parentWindow.height <=
-            childWindow.y + childWindow.height
+            deletedWindow.y + deletedWindow.height
         ) {
           horizParentHeight += parentWindow.height;
           horizParents = horizParents.concat([parentWindow]);
@@ -623,9 +602,23 @@ const findBestParentMatch = (
     }
   }
 
-  if (vertParentWidth === childWindow.width) {
+  logToFile(
+    wmLogFilePath,
+    "VERT PARENTS:" + vertParentWidth.toString(),
+    LogLevel.DEBUG
+  );
+  logToFile(
+    wmLogFilePath,
+    "Horiz PARENTS:" + horizParentHeight.toString(),
+    LogLevel.DEBUG
+  );
+
+  if (vertParentWidth + 5 * (vertParents.length - 1) === deletedWindow.width) {
     return [vertParents, SplitDirection.Vertical];
-  } else if (horizParentHeight === childWindow.height) {
+  } else if (
+    horizParentHeight + 5 * (horizParents.length - 1) ===
+    deletedWindow.height
+  ) {
     return [horizParents, SplitDirection.Horizontal];
   } else {
     logToFile(wmLogFilePath, "COULDNT RESIZE PARENTS", LogLevel.INFO);
@@ -634,80 +627,96 @@ const findBestParentMatch = (
 };
 
 const resizeRepositionReparentChildren = (
-  parent: FyrWindow,
+  deletedParent: FyrWindow,
   children: Array<FyrWindow>,
   splitType: SplitDirection
 ): void => {
   let immediateVertChild: FyrWindow;
   let immediateHorzChild: FyrWindow;
-  logToFile(wmLogFilePath, JSON.stringify(immediateVertChild), LogLevel.DEBUG);
-  logToFile(wmLogFilePath, JSON.stringify(immediateHorzChild), LogLevel.DEBUG);
   children.forEach((childWindow) => {
     // Get immediate child for reparenting
-    if (parent.verticalChildId === childWindow.windowId) {
+    if (
+      deletedParent.verticalChildId === childWindow.windowId ||
+      childWindow.verticalParentId === deletedParent.windowId ||
+      // Sharing a vertical border and starting at the same X coordinate
+      ((deletedParent.y + deletedParent.height + 5 === childWindow.y ||
+        deletedParent.y + deletedParent.height === childWindow.y) &&
+        deletedParent.x === childWindow.x)
+    ) {
       immediateVertChild = childWindow;
     }
 
-    if (parent.horizontalChildId === childWindow.windowId) {
+    if (
+      deletedParent.horizontalChildId === childWindow.windowId ||
+      childWindow.horizontalParentId === deletedParent.windowId ||
+      //Sharing a horizontal border and starting at same y coordinate
+      ((deletedParent.x + deletedParent.width + 5 === childWindow.x ||
+        deletedParent.x + deletedParent.width === childWindow.x) &&
+        deletedParent.y === childWindow.y)
+    ) {
       immediateHorzChild = childWindow;
     }
 
     if (splitType === SplitDirection.Horizontal) {
       const [width, height]: [number, number] = [
-        childWindow.width + parent.width + 5,
+        childWindow.width + deletedParent.width + 5,
         childWindow.height,
       ];
-      const [x, y]: [number, number] = [parent.x, childWindow.y];
+      const [x, y]: [number, number] = [deletedParent.x, childWindow.y];
       deleteFyrWin(childWindow.windowId);
       addFyrWind({
         ...childWindow,
         width,
-        x: parent.x,
+        x: deletedParent.x,
       });
       X.ResizeWindow(childWindow.windowId, width, height);
       X.MoveWindow(childWindow.windowId, x, y);
     } else if (splitType === SplitDirection.Vertical) {
       const [width, height]: [number, number] = [
         childWindow.width,
-        childWindow.height + parent.height + 5,
+        childWindow.height + deletedParent.height + 5,
       ];
-      const [x, y]: [number, number] = [childWindow.x, parent.y];
+      const [x, y]: [number, number] = [childWindow.x, deletedParent.y];
       deleteFyrWin(childWindow.windowId);
       addFyrWind({
         ...childWindow,
         height,
-        y: parent.y,
+        y: deletedParent.y,
       });
       X.ResizeWindow(childWindow.windowId, width, height);
       X.MoveWindow(childWindow.windowId, x, y);
     }
   });
 
-  if (immediateHorzChild?.horizontalParentId === parent.windowId) {
+  if (immediateHorzChild && splitType === SplitDirection.Horizontal) {
+    logToFile(wmLogFilePath, "UPDATING IMMEDIATE CHILD", LogLevel.DEBUG);
     deleteFyrWin(immediateHorzChild.windowId);
     addFyrWind({
       ...immediateHorzChild,
-      x: parent.x,
-      width: immediateHorzChild.width + parent.width + 5,
-      verticalParentId: parent.verticalParentId,
-      horizontalParentId: parent.horizontalParentId,
+      x: deletedParent.x,
+      width: immediateHorzChild.width + deletedParent.width + 5,
+      verticalParentId: deletedParent.verticalParentId,
+      horizontalParentId: deletedParent.horizontalParentId,
     });
-  } else if (immediateVertChild?.verticalParentId === parent.windowId) {
+  } else if (immediateVertChild) {
+    logToFile(wmLogFilePath, "UPDATING IMMEDIATE CHILD", LogLevel.DEBUG);
     deleteFyrWin(immediateVertChild.windowId);
     addFyrWind({
       ...immediateVertChild,
-      y: parent.y,
-      height: immediateVertChild.height + parent.height + 5,
-      verticalParentId: parent.verticalParentId,
-      horizontalParentId: parent.horizontalParentId,
+      y: deletedParent.y,
+      height: immediateVertChild.height + deletedParent.height + 5,
+      verticalParentId: deletedParent.verticalParentId,
+      horizontalParentId: deletedParent.horizontalParentId,
     });
   }
 
+  //TODO: INVESTIGATE
   // Update parent's with new child Id's
-  const horizontalParent = findFyrWindow(parent.horizontalParentId);
-  const verticalParent = findFyrWindow(parent.verticalParentId);
+  const horizontalParent = findFyrWindow(deletedParent.horizontalParentId);
+  const verticalParent = findFyrWindow(deletedParent.verticalParentId);
 
   if (horizontalParent) {
+    logToFile(wmLogFilePath, "UPDATING HORIZ PARENT", LogLevel.DEBUG);
     deleteFyrWin(horizontalParent.windowId);
     addFyrWind({
       ...horizontalParent,
@@ -715,6 +724,7 @@ const resizeRepositionReparentChildren = (
     });
   }
   if (verticalParent) {
+    logToFile(wmLogFilePath, "UPDATING VERTICAL PARENT", LogLevel.DEBUG);
     deleteFyrWin(verticalParent.windowId);
     addFyrWind({
       ...verticalParent,
@@ -821,7 +831,6 @@ const resizeRepositionRechildParents = (
 };
 
 const resizeOnDestroy = (deletedWindow: FyrWindow): void => {
-  deleteFyrWin(deletedWindow.windowId);
   if (deletedWindow) {
     const [childrenToResize, childSplitType] =
       findBestChildrenMatch(deletedWindow);
@@ -842,6 +851,7 @@ const resizeOnDestroy = (deletedWindow: FyrWindow): void => {
         childrenToResize,
         childSplitType
       );
+      deleteFyrWin(deletedWindow.windowId);
       return;
     }
   }
@@ -858,11 +868,12 @@ const resizeOnDestroy = (deletedWindow: FyrWindow): void => {
       parentsToResize,
       parentSpltType
     );
+    deleteFyrWin(deletedWindow.windowId);
     return;
   }
 
   logToFile(wmLogFilePath, "ERROR RESIZING", LogLevel.ERROR);
-
+  deleteFyrWin(deletedWindow.windowId);
   return;
 };
 
