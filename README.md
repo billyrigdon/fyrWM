@@ -1,11 +1,10 @@
 # fyrWM
 
-### (early stages/work in progress)
+![fyrWM screenshot](./screenshot.png)
 
 fyrWM \(frick your ram\) is an x11 tiling window manager written in typescript using electron, vue, and node-x11. This is an early build and not at all ready for use. It is primarily for a future arch-based \(btw\) distribution targeted towards developers but also easy to use for anyone. Also intentionally bloated with all of the tools you'll maybe need one day.
 
 The instructions are meant to be run a fresh arch install and are mainly just to install the tools I'm using to build and include in the eventual distribution. Warning: a lot of 3rd party tools.
-
 
 ```
 # Keyboard shorcuts
@@ -15,7 +14,6 @@ The instructions are meant to be run a fresh arch install and are mainly just to
 # Super + Space: open autocomplete
 # Ctrl + Shift + Q: close window manager
 ```
-
 
 ```
 #Clone repo
